@@ -128,7 +128,8 @@ with tab1:
     col1, col2, col3, col4 = st.columns(4)
     
     # Total Customers
-    total_customers = get_data("SELECT COUNT(*) AS CNT FROM SIO_DB.DATA.CUSTOMERS WHERE ACCOUNT_STATUS = 'ACTIVE'")
+    customer_filter = f" AND REGION_ID = {selected_region_id}" if selected_region_id else ""
+    total_customers = get_data(f"SELECT COUNT(*) AS CNT FROM SIO_DB.DATA.CUSTOMERS WHERE ACCOUNT_STATUS = 'ACTIVE'{customer_filter}")
     with col1:
         if not total_customers.empty:
             st.metric("Active Customers", f"{total_customers['CNT'].values[0]:,}")
@@ -136,10 +137,20 @@ with tab1:
             st.metric("Active Customers", "N/A")
     
     # Total Water Usage (Last 30 days)
+    usage_region_filter = f"""
+        AND wm.METER_ID IN (
+            SELECT METER_ID FROM SIO_DB.DATA.WATER_METERS wm2
+            JOIN SIO_DB.DATA.CUSTOMERS c2 ON wm2.CUSTOMER_ID = c2.CUSTOMER_ID
+            WHERE c2.REGION_ID = {selected_region_id}
+        )
+    """ if selected_region_id else ""
+    
     total_usage = get_data(f"""
-        SELECT SUM(VOLUME_M3) AS TOTAL_USAGE
-        FROM SIO_DB.DATA.WATER_USAGE
-        WHERE READING_DATE >= DATEADD(day, -{days_back}, CURRENT_DATE())
+        SELECT SUM(wu.VOLUME_M3) AS TOTAL_USAGE
+        FROM SIO_DB.DATA.WATER_USAGE wu
+        JOIN SIO_DB.DATA.WATER_METERS wm ON wu.METER_ID = wm.METER_ID
+        WHERE wu.READING_DATE >= DATEADD(day, -{days_back}, CURRENT_DATE())
+        {usage_region_filter}
     """)
     with col2:
         if not total_usage.empty and total_usage['TOTAL_USAGE'].values[0] is not None:
@@ -176,11 +187,15 @@ with tab1:
     
     usage_trends = get_data(f"""
         SELECT 
-            DATE_TRUNC('DAY', READING_DATE) AS DATE,
-            SUM(VOLUME_M3) AS DAILY_USAGE
-        FROM SIO_DB.DATA.WATER_USAGE
-        WHERE READING_DATE >= DATEADD(day, -{days_back}, CURRENT_DATE())
-        GROUP BY DATE_TRUNC('DAY', READING_DATE)
+            DATE_TRUNC('DAY', wu.READING_DATE) AS DATE,
+            SUM(wu.VOLUME_M3) AS DAILY_USAGE
+        FROM SIO_DB.DATA.WATER_USAGE wu
+        JOIN SIO_DB.DATA.WATER_METERS wm ON wu.METER_ID = wm.METER_ID
+        JOIN SIO_DB.DATA.CUSTOMERS c ON wm.CUSTOMER_ID = c.CUSTOMER_ID
+        JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
+        WHERE wu.READING_DATE >= DATEADD(day, -{days_back}, CURRENT_DATE())
+        {region_filter}
+        GROUP BY DATE_TRUNC('DAY', wu.READING_DATE)
         ORDER BY DATE
     """)
     
@@ -199,7 +214,7 @@ with tab1:
     # Regional Summary
     st.subheader("🌍 Regional Summary")
     
-    regional_summary = get_data("""
+    regional_summary = get_data(f"""
         SELECT 
             r.REGION_NAME,
             COUNT(DISTINCT c.CUSTOMER_ID) AS CUSTOMERS,
@@ -213,6 +228,7 @@ with tab1:
         FROM SIO_DB.DATA.REGIONS r
         LEFT JOIN SIO_DB.DATA.CUSTOMERS c ON r.REGION_ID = c.REGION_ID
         LEFT JOIN SIO_DB.DATA.WATER_SOURCES ws ON r.REGION_ID = ws.REGION_ID AND ws.STATUS = 'ACTIVE'
+        WHERE 1=1 {region_filter}
         GROUP BY r.REGION_NAME
         ORDER BY UTILIZATION_PCT ASC
     """)
@@ -304,7 +320,7 @@ with tab2:
     # Regional Heatmap
     st.subheader("🌡️ Regional Water Resource Heatmap")
     
-    heatmap_data = get_data("""
+    heatmap_data = get_data(f"""
         SELECT 
             r.REGION_NAME,
             r.REGION_ID,
@@ -318,7 +334,8 @@ with tab2:
             SELECT wm.CUSTOMER_ID FROM SIO_DB.DATA.WATER_METERS wm WHERE wm.METER_ID = wu.METER_ID
         )
         LEFT JOIN SIO_DB.DATA.WATER_SOURCES ws ON r.REGION_ID = ws.REGION_ID
-        WHERE wu.READING_DATE >= DATEADD(day, -30, CURRENT_DATE()) OR wu.READING_DATE IS NULL
+        WHERE (wu.READING_DATE >= DATEADD(day, -30, CURRENT_DATE()) OR wu.READING_DATE IS NULL)
+        {region_filter}
         GROUP BY r.REGION_NAME, r.REGION_ID
     """)
     
@@ -514,7 +531,7 @@ with tab4:
         FROM SIO_DB.DATA.BILLING b
         JOIN SIO_DB.DATA.CUSTOMERS c ON b.CUSTOMER_ID = c.CUSTOMER_ID
         JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
-        WHERE b.BILL_STATUS = 'OVERDUE'
+        WHERE b.BILL_STATUS = 'OVERDUE' {region_filter}
         ORDER BY DAYS_OVERDUE DESC
         LIMIT 50
     """)
@@ -567,6 +584,7 @@ with tab4:
         FROM SIO_DB.DATA.BILLING b
         JOIN SIO_DB.DATA.CUSTOMERS c ON b.CUSTOMER_ID = c.CUSTOMER_ID
         JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
+        WHERE 1=1 {region_filter}
         GROUP BY r.REGION_NAME
         ORDER BY OVERDUE_AMOUNT DESC
     """)

@@ -333,16 +333,7 @@ with tab2:
         GROUP BY r.REGION_NAME, r.REGION_ID
     """)
     
-    if not heatmap_data.empty and PLOTLY_AVAILABLE:
-        # Convert to numeric types first
-        heatmap_data['TOTAL_USAGE_M3'] = pd.to_numeric(heatmap_data['TOTAL_USAGE_M3'], errors='coerce').fillna(0)
-        heatmap_data['CURRENT_LEVEL_M3'] = pd.to_numeric(heatmap_data['CURRENT_LEVEL_M3'], errors='coerce').fillna(0)
-        heatmap_data['CAPACITY_M3'] = pd.to_numeric(heatmap_data['CAPACITY_M3'], errors='coerce').fillna(1)
-        heatmap_data['CUSTOMERS'] = pd.to_numeric(heatmap_data['CUSTOMERS'], errors='coerce').fillna(1)
-        
-        heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
-        heatmap_data['USAGE_PER_CUSTOMER'] = heatmap_data['TOTAL_USAGE_M3'] / heatmap_data['CUSTOMERS'].replace(0, 1)
-        
+    if not heatmap_data.empty:
         # Add geographical coordinates for Saudi Arabian regions
         region_coords = {
             'Riyadh': {'lat': 24.7136, 'lon': 46.6753},
@@ -361,67 +352,35 @@ with tab2:
         heatmap_data['lat'] = heatmap_data['REGION_NAME'].map(lambda x: region_coords.get(x, {}).get('lat', 24.0))
         heatmap_data['lon'] = heatmap_data['REGION_NAME'].map(lambda x: region_coords.get(x, {}).get('lon', 45.0))
         
-        # Create geographic scatter map
-        fig = go.Figure()
+        # Convert to numeric and calculate metrics
+        heatmap_data['TOTAL_USAGE_M3'] = pd.to_numeric(heatmap_data['TOTAL_USAGE_M3'], errors='coerce').fillna(0)
+        heatmap_data['CURRENT_LEVEL_M3'] = pd.to_numeric(heatmap_data['CURRENT_LEVEL_M3'], errors='coerce').fillna(0)
+        heatmap_data['CAPACITY_M3'] = pd.to_numeric(heatmap_data['CAPACITY_M3'], errors='coerce').fillna(1)
         
-        # Add scatter points sized by usage
-        fig.add_trace(go.Scattergeo(
-            lon=heatmap_data['lon'].tolist(),
-            lat=heatmap_data['lat'].tolist(),
-            text=heatmap_data['REGION_NAME'].tolist(),
-            mode='markers+text',
-            marker=dict(
-                size=(heatmap_data['TOTAL_USAGE_M3'] / 1000).tolist(),  # Scale size
-                color=heatmap_data['UTILIZATION_PCT'].tolist(),
-                colorscale='RdYlGn_r',
-                cmin=0,
-                cmax=100,
-                colorbar=dict(
-                    title="Utilization %",
-                    x=1.05
-                ),
-                line=dict(width=1, color='white'),
-                sizemode='diameter'
-            ),
-            customdata=np.column_stack((
-                heatmap_data['TOTAL_USAGE_M3'],
-                heatmap_data['CUSTOMERS'],
-                heatmap_data['UTILIZATION_PCT']
-            )),
-            hovertemplate='<b>%{text}</b><br>' +
-                         'Usage: %{customdata[0]:,.0f} m³<br>' +
-                         'Customers: %{customdata[1]:,.0f}<br>' +
-                         'Utilization: %{customdata[2]:.1f}%<extra></extra>',
-            textposition='top center',
-            textfont=dict(size=10, color='black')
-        ))
+        heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         
-        # Configure map to focus on Saudi Arabia
-        fig.update_geos(
-            center=dict(lat=24.0, lon=45.0),
-            projection_scale=4,
-            showcountries=True,
-            countrycolor="lightgray",
-            showcoastlines=True,
-            coastlinecolor="gray",
-            showland=True,
-            landcolor="rgb(243, 243, 243)",
-            showlakes=True,
-            lakecolor="rgb(200, 230, 250)"
-        )
+        # Color based on utilization (red = high, green = low)
+        def get_color(util):
+            if util > 85:
+                return [255, 0, 0, 160]  # Red - high utilization
+            elif util > 60:
+                return [255, 165, 0, 160]  # Orange - moderate
+            else:
+                return [0, 255, 0, 160]  # Green - low
         
-        fig.update_layout(
-            title='Geographic Water Usage Heatmap - Saudi Arabia',
-            height=600,
-            geo=dict(
-                scope='asia',
-                projection_type='mercator'
-            )
-        )
+        heatmap_data['color'] = heatmap_data['UTILIZATION_PCT'].apply(get_color)
         
-        st.plotly_chart(fig, use_container_width=True)
+        # Size based on usage (scaled down)
+        heatmap_data['size'] = heatmap_data['TOTAL_USAGE_M3'] / 50
+        
+        st.map(heatmap_data, 
+               latitude='lat',
+               longitude='lon', 
+               size='size',
+               color='color',
+               zoom=5)
     else:
-        st.info("Geographic heatmap requires data and Plotly library")
+        st.info("Map requires regional data")
 
 # ============================================================================
 # TAB 3: ML PREDICTIONS

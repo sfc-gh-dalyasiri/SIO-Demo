@@ -622,7 +622,7 @@ with tab4:
     # Overdue bills
     st.subheader("⚠️ Customers with Overdue Payments")
     
-    overdue_bills = get_data("""
+    overdue_bills = get_data(f"""
         SELECT 
             c.CUSTOMER_NAME,
             r.REGION_NAME,
@@ -674,7 +674,7 @@ with tab4:
     # Regional payment analysis
     st.subheader("🌍 Regional Payment Analysis")
     
-    regional_payments = get_data("""
+    regional_payments = get_data(f"""
         SELECT 
             r.REGION_NAME,
             COUNT(DISTINCT CASE WHEN b.BILL_STATUS = 'OVERDUE' THEN b.CUSTOMER_ID END) AS OVERDUE_CUSTOMERS,

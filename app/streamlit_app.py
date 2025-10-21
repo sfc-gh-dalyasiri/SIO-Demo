@@ -54,17 +54,18 @@ def init_connection():
         # Fall back to local development with st.connection
         return st.connection("snowflake")
 
+@st.cache_data(ttl=60)
 def get_data(query):
-    """Execute query and return results"""
+    """Execute query and return results - works consistently in both local and SIS"""
     try:
         session = init_connection()
         # Check if it's Snowpark session (hosted) or connection object (local)
         if hasattr(session, 'sql'):
-            # Hosted Snowflake Streamlit (Snowpark session)
+            # Snowflake Streamlit in Snowsight (SIS) - Snowpark session
             return session.sql(query).to_pandas()
         else:
-            # Local development (connection object)
-            return session.query(query, ttl=60)
+            # Local development - connection object
+            return session.query(query)
     except Exception as e:
         st.error(f"Error executing query: {str(e)}")
         return pd.DataFrame()

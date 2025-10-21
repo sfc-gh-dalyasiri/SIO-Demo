@@ -667,26 +667,29 @@ with tab3:
             st.divider()
             
             # Extract and display the "Why Anomalous" explanation
-            why_match = re.search(r'Why Anomalous: (.+?)(?:\n|$)', report, re.DOTALL)
+            why_match = re.search(r'Why Anomalous: (.+?)RECOMMENDATION:', report, re.DOTALL)
             if why_match:
                 why_text = why_match.group(1).strip()
                 
                 # Split technical explanation from AI analysis
                 if '🤖 AI Analysis:' in why_text:
-                    technical, ai_part = why_text.split('🤖 AI Analysis:', 1)
+                    parts = why_text.split('🤖 AI Analysis:', 1)
+                    technical = parts[0].strip()
+                    ai_part = parts[1].strip() if len(parts) > 1 else ""
                     
                     st.markdown("#### 🔬 Technical Analysis")
-                    st.info(technical.strip())
+                    st.info(technical)
                     
-                    st.markdown("#### 🤖 AI Diagnosis")
-                    # Clean up AI response - remove any preamble
-                    ai_cleaned = ai_part.strip()
-                    # Remove common preambles
-                    ai_cleaned = re.sub(r'^Here is .*?:\s*', '', ai_cleaned, flags=re.IGNORECASE)
-                    ai_cleaned = re.sub(r'^\*\*.*?\*\*\s*', '', ai_cleaned)  # Remove bold headers
-                    ai_cleaned = ai_cleaned.strip()
-                    
-                    st.success(ai_cleaned)
+                    if ai_part:
+                        st.markdown("#### 🤖 AI Diagnosis")
+                        # Clean up AI response - remove preambles and formatting
+                        ai_cleaned = ai_part
+                        ai_cleaned = re.sub(r'^Here is .*?:\s*', '', ai_cleaned, flags=re.IGNORECASE | re.DOTALL)
+                        ai_cleaned = re.sub(r'^\*\*[^*]+\*\*\s*', '', ai_cleaned, flags=re.DOTALL)
+                        ai_cleaned = re.sub(r'^[\n\s]+', '', ai_cleaned)
+                        ai_cleaned = ai_cleaned.strip()
+                        
+                        st.success(ai_cleaned)
                 else:
                     st.markdown("#### 🔬 Analysis")
                     st.info(why_text)

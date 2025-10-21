@@ -64,7 +64,10 @@ with st.sidebar:
     # Refresh button
     if st.button("🔄 Refresh Data", use_container_width=True):
         st.cache_data.clear()
-        st.rerun()
+        try:
+            st.rerun()  # New Streamlit versions
+        except AttributeError:
+            st.experimental_rerun()  # Older Streamlit versions (Snowflake)
     
     st.divider()
     

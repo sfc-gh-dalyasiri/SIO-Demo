@@ -29,14 +29,26 @@ except ImportError:
 # Initialize Snowflake connection
 @st.cache_resource
 def init_connection():
-    """Initialize Snowflake connection"""
-    return st.connection("snowflake")
+    """Initialize Snowflake connection - works for both local and hosted"""
+    try:
+        # Try hosted Snowflake Streamlit first
+        from snowflake.snowpark.context import get_active_session
+        return get_active_session()
+    except:
+        # Fall back to local development with st.connection
+        return st.connection("snowflake")
 
 def get_data(query):
     """Execute query and return results"""
     try:
-        conn = init_connection()
-        return conn.query(query, ttl=60)
+        session = init_connection()
+        # Check if it's Snowpark session (hosted) or connection object (local)
+        if hasattr(session, 'sql'):
+            # Hosted Snowflake Streamlit (Snowpark session)
+            return session.sql(query).to_pandas()
+        else:
+            # Local development (connection object)
+            return session.query(query, ttl=60)
     except Exception as e:
         st.error(f"Error executing query: {str(e)}")
         return pd.DataFrame()

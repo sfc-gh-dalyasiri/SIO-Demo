@@ -1,0 +1,227 @@
+---
+description: Git integration for Streamlit deployment in Snowflake
+alwaysApply: false
+---
+
+# Git-Integrated Streamlit Deployment
+
+## Overview
+
+Streamlit apps in Snowflake can be linked directly to GitHub repositories for automatic deployment and version control.
+
+## Setup Process
+
+### 1. Create Git Repository Integration
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE YOUR_DB;
+
+-- Create schema for git repos
+CREATE SCHEMA IF NOT EXISTS GIT_REPOS;
+
+-- Link GitHub repository
+CREATE OR REPLACE GIT REPOSITORY YOUR_DB.GIT_REPOS.YOUR_REPO
+  API_INTEGRATION = github_api_integration  -- Must exist in account
+  ORIGIN = 'https://github.com/your-org/your-repo.git'
+  COMMENT = 'Application repository for Streamlit integration';
+
+-- Fetch latest code
+ALTER GIT REPOSITORY YOUR_DB.GIT_REPOS.YOUR_REPO FETCH;
+
+-- Verify files
+LS @YOUR_DB.GIT_REPOS.YOUR_REPO/branches/master/;
+```
+
+### 2. Create Streamlit from Git Repository
+
+```sql
+-- Create schema for Streamlit apps
+CREATE SCHEMA IF NOT EXISTS STREAMLIT_APPS;
+
+-- Create Streamlit app from Git
+CREATE OR REPLACE STREAMLIT YOUR_STREAMLIT_APP
+  FROM @YOUR_DB.GIT_REPOS.YOUR_REPO/branches/master/app
+  MAIN_FILE = 'streamlit_app.py'
+  QUERY_WAREHOUSE = YOUR_WAREHOUSE
+  TITLE = 'Your App Title'
+  COMMENT = 'Your app description';
+
+-- CRITICAL: Make app live
+ALTER STREAMLIT YOUR_STREAMLIT_APP ADD LIVE VERSION FROM LAST;
+
+-- Grant permissions
+GRANT USAGE ON STREAMLIT YOUR_DB.STREAMLIT_APPS.YOUR_STREAMLIT_APP TO ROLE ACCOUNTADMIN;
+```
+
+### 3. Update Streamlit After Code Changes
+
+```sql
+-- Fetch latest from Git
+ALTER GIT REPOSITORY YOUR_DB.GIT_REPOS.YOUR_REPO FETCH;
+
+-- Streamlit auto-updates, or manually refresh in Snowsight UI
+```
+
+## Critical Requirements
+
+### API Integration
+
+Your Snowflake account must have a GitHub API integration:
+
+```sql
+-- Check if exists
+SHOW API INTEGRATIONS LIKE 'github_api_integration';
+
+-- If not, contact your Snowflake admin to create it
+```
+
+### Repository Structure
+
+```
+your-repo/
+├── app/
+│   ├── streamlit_app.py    ← Main file (referenced in CREATE STREAMLIT)
+│   ├── requirements.txt     ← Dependencies
+│   └── pages/              ← Optional: multi-page apps
+├── data/                    ← Not deployed to Streamlit
+└── README.md
+```
+
+**Important**: Only files in the `app/` directory (or path specified in FROM) are deployed to Streamlit.
+
+## Connection Pattern for Dual Environment Support
+
+**Problem**: `st.connection()` doesn't exist in hosted Snowflake Streamlit
+
+**Solution**: Use this pattern to work in BOTH local and hosted:
+
+```python
+@st.cache_resource
+def init_connection():
+    """Works in both local and hosted Snowflake Streamlit"""
+    try:
+        # Hosted Snowflake Streamlit
+        from snowflake.snowpark.context import get_active_session
+        return get_active_session()
+    except:
+        # Local development
+        return st.connection("snowflake")
+
+def get_data(query):
+    """Execute query - handles both session types"""
+    session = init_connection()
+    if hasattr(session, 'sql'):
+        # Snowpark session (hosted)
+        return session.sql(query).to_pandas()
+    else:
+        # Connection object (local)
+        return session.query(query, ttl=60)
+```
+
+## Development Workflow
+
+### Local Development
+
+1. Clone repository locally
+2. Create `.streamlit/secrets.toml` (gitignored)
+3. Test with: `streamlit run app/streamlit_app.py`
+4. Commit and push changes
+
+### Deploy to Snowflake
+
+1. Push code to GitHub
+2. In Snowflake: `ALTER GIT REPOSITORY ... FETCH;`
+3. App auto-updates in Snowsight
+4. Or create new version: `ALTER STREAMLIT ... ADD LIVE VERSION FROM LAST;`
+
+## Common Issues
+
+### Issue: "module 'streamlit' has no attribute 'connection'"
+
+**Cause**: Using `st.connection()` in hosted Snowflake Streamlit
+
+**Solution**: Use the dual-environment connection pattern above
+
+### Issue: "set_page_config() can only be called once"
+
+**Cause**: Another Streamlit command called before `st.set_page_config()`
+
+**Solution**: Move `st.set_page_config()` to be the VERY FIRST Streamlit command:
+
+```python
+import streamlit as st
+
+# MUST BE FIRST!
+st.set_page_config(...)
+
+# Then everything else
+```
+
+### Issue: "Live version already exists"
+
+**Cause**: Trying to add new version without committing current
+
+**Solution**:
+```sql
+-- Method 1: Just refresh in Snowsight UI (easiest)
+-- Method 2: Manually commit then add
+ALTER STREAMLIT YOUR_APP COMMIT LIVE VERSION;  -- Not always available
+```
+
+Usually just refreshing the page in Snowsight picks up new changes automatically.
+
+### Issue: App doesn't update after Git push
+
+**Solution**:
+```sql
+ALTER GIT REPOSITORY YOUR_DB.GIT_REPOS.YOUR_REPO FETCH;
+```
+
+Then refresh Streamlit app in browser.
+
+## Best Practices
+
+1. **Use Git for version control** - Don't edit directly in Snowsight
+2. **Test locally first** - Catch errors before deployment
+3. **Separate local/hosted config** - Use secrets.toml (local) vs get_active_session() (hosted)
+4. **Keep app/ directory clean** - Only production code, no test files
+5. **Use requirements.txt** - Specify all dependencies
+6. **Handle missing packages gracefully** - Use try/except for optional imports
+
+## Requirements.txt Example
+
+```txt
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+snowflake-connector-python>=3.0.0  # For local dev only
+plotly>=5.17.0  # Optional, use try/except
+```
+
+**Note**: `snowflake-connector-python` not needed in hosted Streamlit (built-in), but required for local testing.
+
+## Accessing Deployed App
+
+**In Snowsight:**
+- Navigate to: **Projects** → **Streamlit**
+- Click on your app name
+- App opens in new tab
+
+**URL Pattern:**
+- Format: `https://app.snowflake.com/.../streamlit/YOUR_APP`
+- Each app gets unique URL ID
+
+## Next Steps
+
+After deploying Streamlit with Git:
+1. Test in both local and hosted environments
+2. Verify all queries work
+3. Check visualizations render
+4. Test error handling
+5. Monitor performance
+
+---
+
+Last Updated: October 2025
+Based on: SIO Irrigation Demo Project learnings

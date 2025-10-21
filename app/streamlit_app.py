@@ -624,12 +624,83 @@ with tab3:
     with col1:
         if 'anomaly_report' in st.session_state:
             analyzed_customer = st.session_state.get('analyzed_customer', 'Unknown')
-            st.subheader(f"📊 Analysis Results: {analyzed_customer}")
+            st.subheader(f"📊 ML Anomaly Analysis: {analyzed_customer}")
             
-            # Display the ML report in a nice formatted box
-            st.code(st.session_state['anomaly_report'], language=None)
+            # Parse the ML report for better display
+            report = st.session_state['anomaly_report']
             
-            st.info("💡 **What This Means**: The ML model identifies unusual water consumption patterns that may indicate leaks, equipment malfunction, or billing issues.")
+            # Extract key metrics using string parsing
+            import re
+            
+            # Extract metrics
+            total_anomalies = int(re.search(r'Total Anomalies Detected: (\d+)', report).group(1)) if re.search(r'Total Anomalies Detected: (\d+)', report) else 0
+            high_risk = int(re.search(r'High Risk Days: (\d+)', report).group(1)) if re.search(r'High Risk Days: (\d+)', report) else 0
+            medium_risk = int(re.search(r'Medium Risk Days: (\d+)', report).group(1)) if re.search(r'Medium Risk Days: (\d+)', report) else 0
+            max_score = float(re.search(r'Maximum Anomaly Score: ([\d.]+)', report).group(1)) if re.search(r'Maximum Anomaly Score: ([\d.]+)', report) else 0
+            avg_usage = re.search(r'Average Daily Usage: ([\d,.]+) m³', report).group(1) if re.search(r'Average Daily Usage: ([\d,.]+) m³', report) else "N/A"
+            
+            # Determine overall risk level
+            if high_risk > 0:
+                risk_color = "🔴"
+                risk_level = "HIGH RISK"
+                alert_type = "error"
+            elif total_anomalies > 0:
+                risk_color = "🟡"
+                risk_level = "MEDIUM RISK"
+                alert_type = "warning"
+            else:
+                risk_color = "🟢"
+                risk_level = "NORMAL"
+                alert_type = "success"
+            
+            # Display summary metrics
+            metric_cols = st.columns(4)
+            with metric_cols[0]:
+                st.metric("Anomalies Found", total_anomalies, delta=f"{risk_color} {risk_level}")
+            with metric_cols[1]:
+                st.metric("High Risk Days", high_risk)
+            with metric_cols[2]:
+                st.metric("Medium Risk Days", medium_risk)
+            with metric_cols[3]:
+                st.metric("Max Anomaly Score", f"{max_score:.1f}/100")
+            
+            st.divider()
+            
+            # Extract and display the "Why Anomalous" explanation
+            why_match = re.search(r'Why Anomalous: (.+?)(?:\n|$)', report, re.DOTALL)
+            if why_match:
+                why_text = why_match.group(1).strip()
+                
+                # Split technical explanation from AI analysis
+                if '🤖 AI Analysis:' in why_text:
+                    technical, ai_part = why_text.split('🤖 AI Analysis:', 1)
+                    
+                    st.markdown("#### 🔬 Technical Analysis")
+                    st.info(technical.strip())
+                    
+                    st.markdown("#### 🤖 AI Diagnosis")
+                    st.success(ai_part.strip())
+                else:
+                    st.markdown("#### 🔬 Analysis")
+                    st.info(why_text)
+            
+            st.divider()
+            
+            # Show recommendation with appropriate alert type
+            rec_match = re.search(r'RECOMMENDATION: (.+?)$', report, re.MULTILINE)
+            if rec_match:
+                recommendation = rec_match.group(1).strip()
+                
+                if 'URGENT' in recommendation:
+                    st.error(f"⚠️ **{recommendation}**")
+                elif 'REVIEW' in recommendation:
+                    st.warning(f"⚠️ **{recommendation}**")
+                else:
+                    st.success(f"✅ **{recommendation}**")
+            
+            # Expandable full report
+            with st.expander("📄 View Full Technical Report"):
+                st.code(report, language=None)
         else:
             st.info("👆 Select a customer and click 'Detect Anomalies' to run ML analysis")
 

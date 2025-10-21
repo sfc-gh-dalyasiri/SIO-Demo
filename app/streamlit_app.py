@@ -337,21 +337,85 @@ with tab2:
         heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         heatmap_data['USAGE_PER_CUSTOMER'] = heatmap_data['TOTAL_USAGE_M3'] / heatmap_data['CUSTOMERS'].replace(0, 1)
         
-        # Create treemap visualization
-        fig = px.treemap(
-            heatmap_data,
-            path=['REGION_NAME'],
-            values='TOTAL_USAGE_M3',
-            color='UTILIZATION_PCT',
-            color_continuous_scale='RdYlGn_r',
-            title='Regional Water Usage & Resource Utilization',
-            labels={'UTILIZATION_PCT': 'Utilization %', 'TOTAL_USAGE_M3': 'Total Usage (m³)'}
+        # Add geographical coordinates for Saudi Arabian regions
+        region_coords = {
+            'Riyadh': {'lat': 24.7136, 'lon': 46.6753},
+            'Jeddah': {'lat': 21.5433, 'lon': 39.1728},
+            'Makkah': {'lat': 21.4225, 'lon': 39.8262},
+            'Madinah': {'lat': 24.5247, 'lon': 39.5692},
+            'Dammam': {'lat': 26.4207, 'lon': 50.0888},
+            'Eastern Province': {'lat': 25.3548, 'lon': 49.5828},
+            'Asir': {'lat': 18.2164, 'lon': 42.5053},
+            'Tabuk': {'lat': 28.3838, 'lon': 36.5550},
+            'Hail': {'lat': 27.5219, 'lon': 41.7008},
+            'Qassim': {'lat': 26.3260, 'lon': 43.9750}
+        }
+        
+        # Add coordinates to dataframe
+        heatmap_data['lat'] = heatmap_data['REGION_NAME'].map(lambda x: region_coords.get(x, {}).get('lat', 24.0))
+        heatmap_data['lon'] = heatmap_data['REGION_NAME'].map(lambda x: region_coords.get(x, {}).get('lon', 45.0))
+        
+        # Create geographic scatter map
+        fig = go.Figure()
+        
+        # Add scatter points sized by usage
+        fig.add_trace(go.Scattergeo(
+            lon=heatmap_data['lon'],
+            lat=heatmap_data['lat'],
+            text=heatmap_data['REGION_NAME'],
+            mode='markers+text',
+            marker=dict(
+                size=heatmap_data['TOTAL_USAGE_M3'] / 1000,  # Scale size
+                color=heatmap_data['UTILIZATION_PCT'],
+                colorscale='RdYlGn_r',
+                cmin=0,
+                cmax=100,
+                colorbar=dict(
+                    title="Utilization %",
+                    x=1.05
+                ),
+                line=dict(width=1, color='white'),
+                sizemode='diameter'
+            ),
+            customdata=np.column_stack((
+                heatmap_data['TOTAL_USAGE_M3'],
+                heatmap_data['CUSTOMERS'],
+                heatmap_data['UTILIZATION_PCT']
+            )),
+            hovertemplate='<b>%{text}</b><br>' +
+                         'Usage: %{customdata[0]:,.0f} m³<br>' +
+                         'Customers: %{customdata[1]:,.0f}<br>' +
+                         'Utilization: %{customdata[2]:.1f}%<extra></extra>',
+            textposition='top center',
+            textfont=dict(size=10, color='black')
+        ))
+        
+        # Configure map to focus on Saudi Arabia
+        fig.update_geos(
+            center=dict(lat=24.0, lon=45.0),
+            projection_scale=4,
+            showcountries=True,
+            countrycolor="lightgray",
+            showcoastlines=True,
+            coastlinecolor="gray",
+            showland=True,
+            landcolor="rgb(243, 243, 243)",
+            showlakes=True,
+            lakecolor="rgb(200, 230, 250)"
         )
-        fig.update_traces(textinfo="label+value")
-        fig.update_layout(height=500)
+        
+        fig.update_layout(
+            title='Geographic Water Usage Heatmap - Saudi Arabia',
+            height=600,
+            geo=dict(
+                scope='asia',
+                projection_type='mercator'
+            )
+        )
+        
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("Heatmap visualization requires data and Plotly library")
+        st.info("Geographic heatmap requires data and Plotly library")
 
 # ============================================================================
 # TAB 3: ML PREDICTIONS

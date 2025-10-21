@@ -8,6 +8,14 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
+# Page config - MUST be first Streamlit command
+st.set_page_config(
+    page_title="SIO Irrigation Dashboard",
+    page_icon="🌊",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 # Try to import plotly, fallback to streamlit built-in charts
 try:
     import plotly.express as px
@@ -15,15 +23,8 @@ try:
     PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
+    # Show warning after page config
     st.sidebar.warning("⚠️ Plotly not available. Using Streamlit built-in charts.")
-
-# Page config
-st.set_page_config(
-    page_title="SIO Irrigation Dashboard",
-    page_icon="🌊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Initialize Snowflake connection
 @st.cache_resource

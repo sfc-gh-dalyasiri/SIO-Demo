@@ -223,10 +223,10 @@ with tab1:
         usage_trends['DAILY_USAGE'] = pd.to_numeric(usage_trends['DAILY_USAGE'], errors='coerce').fillna(0)
         usage_trends['DATE'] = pd.to_datetime(usage_trends['DATE'])
         
+        # Convert to millions for better readability - ALWAYS, not just for Plotly
+        usage_trends['DAILY_USAGE_M'] = usage_trends['DAILY_USAGE'] / 1_000_000
+        
         if PLOTLY_AVAILABLE:
-            # Convert to millions for better readability
-            usage_trends['DAILY_USAGE_M'] = usage_trends['DAILY_USAGE'] / 1_000_000
-            
             fig = px.line(usage_trends, x='DATE', y='DAILY_USAGE_M',
                          title=f'Daily Water Usage - Last {days_back} Days',
                          labels={'DAILY_USAGE_M': 'Usage (Million m³)', 'DATE': 'Date'})
@@ -237,7 +237,8 @@ with tab1:
             )
             st.plotly_chart(fig)
         else:
-            st.line_chart(usage_trends.set_index('DATE')['DAILY_USAGE'])
+            # Fallback also uses millions
+            st.line_chart(usage_trends.set_index('DATE')['DAILY_USAGE_M'])
     else:
         st.info("No usage data available")
     

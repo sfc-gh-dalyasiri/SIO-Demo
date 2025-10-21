@@ -218,11 +218,11 @@ with tab1:
             "CAPACITY_M3": "Capacity (m³)",
             "UTILIZATION_PCT": "Utilization %"
         })
-        # Format numeric columns
-        display_df["Customers"] = display_df["Customers"].astype(int)
-        display_df["Current Level (m³)"] = display_df["Current Level (m³)"].round(0).astype(int)
-        display_df["Capacity (m³)"] = display_df["Capacity (m³)"].round(0).astype(int)
-        display_df["Utilization %"] = display_df["Utilization %"].round(1)
+        # Format numeric columns - convert to numeric type first
+        display_df["Customers"] = pd.to_numeric(display_df["Customers"], errors='coerce').fillna(0).astype(int)
+        display_df["Current Level (m³)"] = pd.to_numeric(display_df["Current Level (m³)"], errors='coerce').fillna(0).round(0).astype(int)
+        display_df["Capacity (m³)"] = pd.to_numeric(display_df["Capacity (m³)"], errors='coerce').fillna(0).round(0).astype(int)
+        display_df["Utilization %"] = pd.to_numeric(display_df["Utilization %"], errors='coerce').fillna(0).round(1)
         
         st.dataframe(
             display_df,
@@ -278,9 +278,9 @@ with tab2:
             "WATER_UTILIZATION_PERCENT": "Utilization %",
             "OPPORTUNITIES": "Opportunities"
         })
-        # Format numeric columns
-        display_df["Score"] = display_df["Score"].round(1)
-        display_df["Utilization %"] = display_df["Utilization %"].round(1)
+        # Format numeric columns - convert to numeric type first
+        display_df["Score"] = pd.to_numeric(display_df["Score"], errors='coerce').fillna(0).round(1)
+        display_df["Utilization %"] = pd.to_numeric(display_df["Utilization %"], errors='coerce').fillna(0).round(1)
         
         st.dataframe(
             display_df,
@@ -410,10 +410,10 @@ with tab3:
                 "WEATHER_FACTOR": "Weather Factor",
                 "RECOMMENDATION": "Recommendation"
             })
-            # Format numeric columns
-            display_df["Predicted Demand (m³)"] = display_df["Predicted Demand (m³)"].round(2)
-            display_df["Seasonal Factor"] = display_df["Seasonal Factor"].round(2)
-            display_df["Weather Factor"] = display_df["Weather Factor"].round(2)
+            # Format numeric columns - convert to numeric type first
+            display_df["Predicted Demand (m³)"] = pd.to_numeric(display_df["Predicted Demand (m³)"], errors='coerce').fillna(0).round(2)
+            display_df["Seasonal Factor"] = pd.to_numeric(display_df["Seasonal Factor"], errors='coerce').fillna(0).round(2)
+            display_df["Weather Factor"] = pd.to_numeric(display_df["Weather Factor"], errors='coerce').fillna(0).round(2)
             
             st.dataframe(
                 display_df,
@@ -517,9 +517,9 @@ with tab4:
             "DUE_DATE": "Due Date",
             "DAYS_OVERDUE": "Days Overdue"
         })
-        # Format numeric columns
-        display_df["Amount (SAR)"] = display_df["Amount (SAR)"].round(2)
-        display_df["Days Overdue"] = display_df["Days Overdue"].astype(int)
+        # Format numeric columns - convert to numeric type first
+        display_df["Amount (SAR)"] = pd.to_numeric(display_df["Amount (SAR)"], errors='coerce').fillna(0).round(2)
+        display_df["Days Overdue"] = pd.to_numeric(display_df["Days Overdue"], errors='coerce').fillna(0).astype(int)
         
         st.dataframe(
             display_df,

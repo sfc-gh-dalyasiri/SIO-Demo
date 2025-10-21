@@ -16,6 +16,22 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Load custom CSS
+def load_css():
+    """Load custom CSS for beautiful styling"""
+    try:
+        with open('app/styles.css') as f:
+            st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+    except FileNotFoundError:
+        # Fallback for local development
+        try:
+            with open('styles.css') as f:
+                st.markdown(f'<style>{f.read()}</style>', unsafe_allow_html=True)
+        except FileNotFoundError:
+            pass  # No custom CSS available
+
+load_css()
+
 # Try to import plotly, fallback to streamlit built-in charts
 try:
     import plotly.express as px
@@ -53,9 +69,13 @@ def get_data(query):
         st.error(f"Error executing query: {str(e)}")
         return pd.DataFrame()
 
-# App title
-st.title("🌊 SIO Irrigation Management Dashboard")
-st.markdown("**Saudi Irrigation Organization** - Smart Water Resource Optimization")
+# App title with styled header
+st.markdown("""
+<div class="main-header">
+    <h1>🌊 SIO Irrigation Management Dashboard</h1>
+    <p>Saudi Irrigation Organization - Smart Water Resource Optimization</p>
+</div>
+""", unsafe_allow_html=True)
 
 # Sidebar
 with st.sidebar:
@@ -125,7 +145,7 @@ tab1, tab2, tab3, tab4 = st.tabs([
 # TAB 1: OVERVIEW
 # ============================================================================
 with tab1:
-    st.header("System Overview")
+    st.markdown("### 📊 System Overview")
     
     # KPIs
     col1, col2, col3, col4 = st.columns(4)
@@ -255,7 +275,7 @@ with tab1:
 # TAB 2: REGIONAL ANALYSIS
 # ============================================================================
 with tab2:
-    st.header("🗺️ Regional Water Resource Analysis")
+    st.markdown("### 🗺️ Regional Water Resource Analysis")
     
     # Efficiency Analysis
     st.subheader("⚡ Regional Efficiency Score")
@@ -387,7 +407,7 @@ with tab2:
 # TAB 3: ML PREDICTIONS
 # ============================================================================
 with tab3:
-    st.header("🔮 ML-Powered Water Demand Forecasting")
+    st.markdown("### 🔮 ML-Powered Water Demand Forecasting")
     
     col1, col2 = st.columns([2, 1])
     
@@ -522,7 +542,7 @@ with tab3:
 # TAB 4: BILLING & PAYMENTS
 # ============================================================================
 with tab4:
-    st.header("💰 Billing & Payment Status")
+    st.markdown("### 💰 Billing & Payment Status")
     
     # Payment status overview
     st.subheader("📊 Payment Status Overview")

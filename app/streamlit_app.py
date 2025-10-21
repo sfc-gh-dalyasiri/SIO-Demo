@@ -36,10 +36,18 @@ load_css()
 try:
     import plotly.express as px
     import plotly.graph_objects as go
-    PLOTLY_AVAILABLE = True
+    
+    # Check if running in SIS (has get_active_session)
+    try:
+        from snowflake.snowpark.context import get_active_session
+        # In SIS - disable Plotly for now to debug
+        PLOTLY_AVAILABLE = False
+        st.sidebar.info("ℹ️ Using Streamlit native charts in SIS environment")
+    except:
+        # Local - use Plotly
+        PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
-    # Show warning after page config
     st.sidebar.warning("⚠️ Plotly not available. Using Streamlit built-in charts.")
 
 # Initialize Snowflake connection

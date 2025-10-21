@@ -334,6 +334,12 @@ with tab2:
     """)
     
     if not heatmap_data.empty and PLOTLY_AVAILABLE:
+        # Convert to numeric types first
+        heatmap_data['TOTAL_USAGE_M3'] = pd.to_numeric(heatmap_data['TOTAL_USAGE_M3'], errors='coerce').fillna(0)
+        heatmap_data['CURRENT_LEVEL_M3'] = pd.to_numeric(heatmap_data['CURRENT_LEVEL_M3'], errors='coerce').fillna(0)
+        heatmap_data['CAPACITY_M3'] = pd.to_numeric(heatmap_data['CAPACITY_M3'], errors='coerce').fillna(1)
+        heatmap_data['CUSTOMERS'] = pd.to_numeric(heatmap_data['CUSTOMERS'], errors='coerce').fillna(1)
+        
         heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         heatmap_data['USAGE_PER_CUSTOMER'] = heatmap_data['TOTAL_USAGE_M3'] / heatmap_data['CUSTOMERS'].replace(0, 1)
         
@@ -360,13 +366,13 @@ with tab2:
         
         # Add scatter points sized by usage
         fig.add_trace(go.Scattergeo(
-            lon=heatmap_data['lon'],
-            lat=heatmap_data['lat'],
-            text=heatmap_data['REGION_NAME'],
+            lon=heatmap_data['lon'].tolist(),
+            lat=heatmap_data['lat'].tolist(),
+            text=heatmap_data['REGION_NAME'].tolist(),
             mode='markers+text',
             marker=dict(
-                size=heatmap_data['TOTAL_USAGE_M3'] / 1000,  # Scale size
-                color=heatmap_data['UTILIZATION_PCT'],
+                size=(heatmap_data['TOTAL_USAGE_M3'] / 1000).tolist(),  # Scale size
+                color=heatmap_data['UTILIZATION_PCT'].tolist(),
                 colorscale='RdYlGn_r',
                 cmin=0,
                 cmax=100,

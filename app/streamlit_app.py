@@ -54,7 +54,6 @@ def init_connection():
         # Fall back to local development with st.connection
         return st.connection("snowflake")
 
-@st.cache_data(ttl=60)
 def get_data(query):
     """Execute query and return results - works consistently in both local and SIS"""
     try:
@@ -62,10 +61,13 @@ def get_data(query):
         # Check if it's Snowpark session (hosted) or connection object (local)
         if hasattr(session, 'sql'):
             # Snowflake Streamlit in Snowsight (SIS) - Snowpark session
-            return session.sql(query).to_pandas()
+            df = session.sql(query).to_pandas()
+            # Force reset index to avoid index being used in charts
+            return df.reset_index(drop=True)
         else:
             # Local development - connection object
-            return session.query(query)
+            df = session.query(query)
+            return df.reset_index(drop=True)
     except Exception as e:
         st.error(f"Error executing query: {str(e)}")
         return pd.DataFrame()

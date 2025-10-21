@@ -219,17 +219,12 @@ with tab1:
     """)
     
     if not usage_trends.empty:
-        # Debug: Show data info
-        st.caption(f"📊 Data points: {len(usage_trends)} | Columns: {list(usage_trends.columns)}")
+        # Ensure column names are uppercase (Snowflake returns uppercase)
+        usage_trends.columns = [col.upper() for col in usage_trends.columns]
         
         # Convert to numeric to ensure proper chart rendering
         usage_trends['DAILY_USAGE'] = pd.to_numeric(usage_trends['DAILY_USAGE'], errors='coerce').fillna(0)
         usage_trends['DATE'] = pd.to_datetime(usage_trends['DATE'])
-        
-        # Show sample values for debugging
-        if len(usage_trends) > 0:
-            sample_val = usage_trends['DAILY_USAGE'].iloc[0]
-            st.caption(f"💧 Sample value: {sample_val:,.2f} m³ (={sample_val/1_000_000:.2f}M m³)")
         
         # Convert to millions for better readability - ALWAYS, not just for Plotly
         usage_trends['DAILY_USAGE_M'] = usage_trends['DAILY_USAGE'] / 1_000_000

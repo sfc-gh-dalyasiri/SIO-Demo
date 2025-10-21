@@ -351,7 +351,6 @@ with tab2:
         heatmap_data['TOTAL_USAGE_M3'] = pd.to_numeric(heatmap_data['TOTAL_USAGE_M3'], errors='coerce').fillna(0)
         heatmap_data['CURRENT_LEVEL_M3'] = pd.to_numeric(heatmap_data['CURRENT_LEVEL_M3'], errors='coerce').fillna(0)
         heatmap_data['CAPACITY_M3'] = pd.to_numeric(heatmap_data['CAPACITY_M3'], errors='coerce').fillna(1)
-        heatmap_data['CUSTOMERS'] = pd.to_numeric(heatmap_data['CUSTOMERS'], errors='coerce').fillna(0)
         
         heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         
@@ -375,58 +374,12 @@ with tab2:
         else:
             heatmap_data['size'] = 50000
         
-        # Use pydeck for tooltips
-        try:
-            import pydeck as pdk
-            
-            layer = pdk.Layer(
-                'ScatterplotLayer',
-                data=heatmap_data,
-                get_position='[lon, lat]',
-                get_color='color',
-                get_radius='size',
-                pickable=True,
-                opacity=0.7,
-                stroked=True,
-                filled=True,
-                radius_scale=1,
-                radius_min_pixels=10,
-                radius_max_pixels=100,
-                line_width_min_pixels=1
-            )
-            
-            view_state = pdk.ViewState(
-                latitude=24.0,
-                longitude=45.0,
-                zoom=5.5,
-                pitch=0
-            )
-            
-            tooltip = {
-                "html": "<b>{REGION_NAME}</b><br/>"
-                        "Usage: {TOTAL_USAGE_M3:,.0f} m³<br/>"
-                        "Customers: {CUSTOMERS:,.0f}<br/>"
-                        "Utilization: {UTILIZATION_PCT:.1f}%",
-                "style": {
-                    "backgroundColor": "steelblue",
-                    "color": "white"
-                }
-            }
-            
-            st.pydeck_chart(pdk.Deck(
-                layers=[layer],
-                initial_view_state=view_state,
-                tooltip=tooltip,
-                map_style='light'
-            ))
-        except ImportError:
-            # Fallback to simple st.map without tooltips
-            st.map(heatmap_data, 
-                   latitude='lat',
-                   longitude='lon', 
-                   size='size',
-                   color='color',
-                   zoom=6)
+        st.map(heatmap_data, 
+               latitude='lat',
+               longitude='lon', 
+               size='size',
+               color='color',
+               zoom=6)
     else:
         st.info("Map requires regional data")
 
@@ -544,11 +497,7 @@ with tab3:
             display_df["Seasonal Factor"] = pd.to_numeric(display_df["Seasonal Factor"], errors='coerce').fillna(0).round(2)
             display_df["Weather Factor"] = pd.to_numeric(display_df["Weather Factor"], errors='coerce').fillna(0).round(2)
             
-            st.dataframe(
-                display_df,
-                hide_index=True,
-                use_container_width=True
-            )
+            st.dataframe(display_df)
             
             # Key insights
             st.divider()

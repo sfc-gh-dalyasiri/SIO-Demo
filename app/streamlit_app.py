@@ -386,20 +386,35 @@ with tab2:
         
         heatmap_data['color'] = heatmap_data['UTILIZATION_PCT'].apply(get_color)
         
-        # Size in meters
-        min_usage = heatmap_data['TOTAL_USAGE_M3'].min()
-        max_usage = heatmap_data['TOTAL_USAGE_M3'].max()
-        if max_usage > min_usage:
-            heatmap_data['size'] = 30000 + ((heatmap_data['TOTAL_USAGE_M3'] - min_usage) / (max_usage - min_usage)) * 70000
-        else:
-            heatmap_data['size'] = 50000
+        # st.map automatically detects 'lat' and 'lon' columns
+        st.map(heatmap_data)
         
-        st.map(heatmap_data, 
-               latitude='lat',
-               longitude='lon', 
-               size='size',
-               color='color',
-               zoom=6)
+        # Add utilization legend table since old st.map doesn't support colors
+        st.markdown("#### 📊 Regional Utilization Details")
+        legend_df = heatmap_data[['REGION_NAME', 'TOTAL_USAGE_M3', 'CUSTOMERS', 'UTILIZATION_PCT']].copy()
+        legend_df = legend_df.rename(columns={
+            'REGION_NAME': 'Region',
+            'TOTAL_USAGE_M3': 'Usage (m³)',
+            'CUSTOMERS': 'Customers',
+            'UTILIZATION_PCT': 'Utilization %'
+        })
+        legend_df['Usage (m³)'] = legend_df['Usage (m³)'].round(0).astype(int)
+        legend_df['Customers'] = legend_df['Customers'].astype(int)
+        legend_df['Utilization %'] = legend_df['Utilization %'].round(1)
+        
+        # Add status indicator
+        def get_status(util):
+            if util >= 85:
+                return '🔴 High'
+            elif util >= 60:
+                return '🟠 Moderate'
+            else:
+                return '🟢 Optimal'
+        
+        legend_df['Status'] = legend_df['Utilization %'].apply(get_status)
+        legend_df = legend_df[['Region', 'Status', 'Usage (m³)', 'Customers', 'Utilization %']]
+        
+        st.dataframe(legend_df)
     else:
         st.info("Map requires regional data")
 

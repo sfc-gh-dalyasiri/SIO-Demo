@@ -436,5 +436,54 @@ tables:
       columns:
         - READING_ID
 
+# ========================================================================
+# RELATIONSHIPS (Define how tables connect)
+# ========================================================================
+relationships:
+  - name: customer_to_region
+    left_table: customers
+    right_table: regions
+    relationship_columns:
+      - left_column: REGION_ID
+        right_column: REGION_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+  
+  - name: water_source_to_region
+    left_table: water_sources
+    right_table: regions
+    relationship_columns:
+      - left_column: REGION_ID
+        right_column: REGION_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+  
+  - name: billing_to_customer
+    left_table: billing
+    right_table: customers
+    relationship_columns:
+      - left_column: CUSTOMER_ID
+        right_column: CUSTOMER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+  
+  - name: water_usage_to_meter
+    left_table: water_usage
+    right_table: water_meters
+    relationship_columns:
+      - left_column: METER_ID
+        right_column: METER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+  
+  - name: meter_to_customer
+    left_table: water_meters
+    right_table: customers
+    relationship_columns:
+      - left_column: CUSTOMER_ID
+        right_column: CUSTOMER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+
 # Verified queries removed - letting Cortex Analyst handle queries dynamically
 

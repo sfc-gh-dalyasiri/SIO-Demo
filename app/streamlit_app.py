@@ -209,15 +209,23 @@ with tab1:
     """)
     
     if not regional_summary.empty:
+        # Format data for display (compatible with older Streamlit versions)
+        display_df = regional_summary.copy()
+        display_df = display_df.rename(columns={
+            "REGION_NAME": "Region",
+            "CUSTOMERS": "Customers",
+            "CURRENT_WATER_M3": "Current Level (m³)",
+            "CAPACITY_M3": "Capacity (m³)",
+            "UTILIZATION_PCT": "Utilization %"
+        })
+        # Format numeric columns
+        display_df["Customers"] = display_df["Customers"].astype(int)
+        display_df["Current Level (m³)"] = display_df["Current Level (m³)"].round(0).astype(int)
+        display_df["Capacity (m³)"] = display_df["Capacity (m³)"].round(0).astype(int)
+        display_df["Utilization %"] = display_df["Utilization %"].round(1)
+        
         st.dataframe(
-            regional_summary,
-            column_config={
-                "REGION_NAME": "Region",
-                "CUSTOMERS": st.column_config.NumberColumn("Customers", format="%d"),
-                "CURRENT_WATER_M3": st.column_config.NumberColumn("Current Level (m³)", format="%.0f"),
-                "CAPACITY_M3": st.column_config.NumberColumn("Capacity (m³)", format="%.0f"),
-                "UTILIZATION_PCT": st.column_config.ProgressColumn("Utilization %", format="%.1f%%", min_value=0, max_value=100)
-            },
+            display_df,
             hide_index=True,
             use_container_width=True
         )
@@ -261,15 +269,21 @@ with tab2:
         
         # Detailed efficiency table
         st.subheader("📊 Efficiency Details")
+        # Format data for display (compatible with older Streamlit versions)
+        display_df = efficiency_data.copy()
+        display_df = display_df.rename(columns={
+            "REGION_NAME": "Region",
+            "EFFICIENCY_SCORE": "Score",
+            "EFFICIENCY_RATING": "Rating",
+            "WATER_UTILIZATION_PERCENT": "Utilization %",
+            "OPPORTUNITIES": "Opportunities"
+        })
+        # Format numeric columns
+        display_df["Score"] = display_df["Score"].round(1)
+        display_df["Utilization %"] = display_df["Utilization %"].round(1)
+        
         st.dataframe(
-            efficiency_data,
-            column_config={
-                "REGION_NAME": "Region",
-                "EFFICIENCY_SCORE": st.column_config.NumberColumn("Score", format="%.1f"),
-                "EFFICIENCY_RATING": st.column_config.TextColumn("Rating"),
-                "WATER_UTILIZATION_PERCENT": st.column_config.ProgressColumn("Utilization", format="%.1f%%"),
-                "OPPORTUNITIES": st.column_config.TextColumn("Opportunities", width="large")
-            },
+            display_df,
             hide_index=True,
             use_container_width=True
         )
@@ -386,16 +400,23 @@ with tab3:
             
             # Prediction details
             st.subheader("📋 Detailed Predictions")
+            # Format data for display (compatible with older Streamlit versions)
+            display_df = predictions.copy()
+            display_df = display_df.rename(columns={
+                "PREDICTION_DATE": "Date",
+                "PREDICTED_DEMAND_M3": "Predicted Demand (m³)",
+                "CONFIDENCE_LEVEL": "Confidence",
+                "SEASONAL_FACTOR": "Seasonal Factor",
+                "WEATHER_FACTOR": "Weather Factor",
+                "RECOMMENDATION": "Recommendation"
+            })
+            # Format numeric columns
+            display_df["Predicted Demand (m³)"] = display_df["Predicted Demand (m³)"].round(2)
+            display_df["Seasonal Factor"] = display_df["Seasonal Factor"].round(2)
+            display_df["Weather Factor"] = display_df["Weather Factor"].round(2)
+            
             st.dataframe(
-                predictions,
-                column_config={
-                    "PREDICTION_DATE": "Date",
-                    "PREDICTED_DEMAND_M3": st.column_config.NumberColumn("Predicted Demand (m³)", format="%.2f"),
-                    "CONFIDENCE_LEVEL": st.column_config.TextColumn("Confidence"),
-                    "SEASONAL_FACTOR": st.column_config.NumberColumn("Seasonal Factor", format="%.2f"),
-                    "WEATHER_FACTOR": st.column_config.NumberColumn("Weather Factor", format="%.2f"),
-                    "RECOMMENDATION": st.column_config.TextColumn("Recommendation", width="large")
-                },
+                display_df,
                 hide_index=True,
                 use_container_width=True
             )
@@ -485,17 +506,23 @@ with tab4:
     """)
     
     if not overdue_bills.empty:
+        # Format data for display (compatible with older Streamlit versions)
+        display_df = overdue_bills.copy()
+        display_df = display_df.rename(columns={
+            "CUSTOMER_NAME": "Customer",
+            "REGION_NAME": "Region",
+            "CUSTOMER_TYPE": "Type",
+            "BILLING_MONTH": "Billing Month",
+            "TOTAL_AMOUNT_SAR": "Amount (SAR)",
+            "DUE_DATE": "Due Date",
+            "DAYS_OVERDUE": "Days Overdue"
+        })
+        # Format numeric columns
+        display_df["Amount (SAR)"] = display_df["Amount (SAR)"].round(2)
+        display_df["Days Overdue"] = display_df["Days Overdue"].astype(int)
+        
         st.dataframe(
-            overdue_bills,
-            column_config={
-                "CUSTOMER_NAME": "Customer",
-                "REGION_NAME": "Region",
-                "CUSTOMER_TYPE": "Type",
-                "BILLING_MONTH": st.column_config.DateColumn("Billing Month", format="MMM YYYY"),
-                "TOTAL_AMOUNT_SAR": st.column_config.NumberColumn("Amount (SAR)", format="%.2f"),
-                "DUE_DATE": st.column_config.DateColumn("Due Date"),
-                "DAYS_OVERDUE": st.column_config.NumberColumn("Days Overdue", format="%d")
-            },
+            display_df,
             hide_index=True,
             use_container_width=True
         )

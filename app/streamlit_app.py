@@ -653,15 +653,13 @@ with tab3:
                 risk_level = "NORMAL"
                 alert_type = "success"
             
-            # Display summary metrics
-            metric_cols = st.columns(4)
+            # Display summary metrics (hide total anomalies - always 15% by design)
+            metric_cols = st.columns(3)
             with metric_cols[0]:
-                st.metric("Anomalies Found", total_anomalies, delta=f"{risk_color} {risk_level}")
+                st.metric("High Risk Days", high_risk, delta=f"{risk_color} {risk_level}")
             with metric_cols[1]:
-                st.metric("High Risk Days", high_risk)
-            with metric_cols[2]:
                 st.metric("Medium Risk Days", medium_risk)
-            with metric_cols[3]:
+            with metric_cols[2]:
                 st.metric("Max Anomaly Score", f"{max_score:.1f}/100")
             
             st.divider()

@@ -1,13 +1,12 @@
 ---
-description: Key learnings from SIO Irrigation project - October 2025
+description: Key learnings from Snowflake Cortex AI projects - October 2025
 alwaysApply: false
 ---
 
-# Lessons Learned - SIO Irrigation Project
+# Lessons Learned - Snowflake Cortex AI Projects
 
-**Project**: Saudi Irrigation Organization AI Demo  
-**Date**: October 21, 2025  
-**Key Learnings**: Critical patterns discovered during implementation
+**Updated**: October 21, 2025  
+**Key Learnings**: Critical patterns discovered during production implementations
 
 ---
 
@@ -289,27 +288,53 @@ Based on SIO project, before going live:
 
 ---
 
-### 6. Plotly Chart Rendering in SIS
+### 6. Plotly Chart Rendering in Hosted Streamlit
 
-**Issue**: Plotly charts (px.line, px.bar) render incorrectly in SIS - show linear 0-N instead of actual data  
-**Problem**: Plotly library has compatibility issues with SIS environment  
-**Fix**: Detect SIS environment and use native Streamlit charts instead
+**Issue**: Plotly charts render incorrectly in hosted Snowflake Streamlit - show linear pattern instead of actual data  
+**Root Cause**: Plotly library compatibility issues with hosted environment  
+**Fix**: Auto-detect environment and disable Plotly when hosted
 
 ```python
 try:
     import plotly.express as px
     try:
         from snowflake.snowpark.context import get_active_session
-        # In SIS - use native charts
-        PLOTLY_AVAILABLE = False
+        PLOTLY_AVAILABLE = False  # Hosted - use native charts
     except:
-        # Local - use Plotly
-        PLOTLY_AVAILABLE = True
+        PLOTLY_AVAILABLE = True  # Local - use Plotly
 except ImportError:
     PLOTLY_AVAILABLE = False
 ```
 
-**Impact**: Charts display correctly in both SIS and local environments
+**Impact**: Charts display correctly in both hosted and local environments
+
+### 7. Streamlit API Compatibility
+
+**Issue**: Multiple AttributeErrors when deploying to hosted Streamlit  
+**Problems Found**:
+- `st.column_config` does not exist
+- `st.rerun()` does not exist (use `st.experimental_rerun()`)
+- `hide_index` parameter not supported
+- `use_container_width` causes deprecation spam
+
+**Fix**: Pre-format data and use fallback methods
+
+```python
+# Instead of column_config
+df = df.rename(columns={...})
+df['col'] = pd.to_numeric(df['col']).round(2)
+
+# Instead of st.rerun()
+try:
+    st.rerun()
+except AttributeError:
+    st.experimental_rerun()
+
+# Instead of hide_index/use_container_width
+st.dataframe(df)  # Simple is better
+```
+
+**Impact**: App works in both environments without errors
 
 ---
 

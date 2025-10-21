@@ -359,14 +359,15 @@ with tab2:
         
         heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         
-        # Color based on utilization (red = high, green = low)
+        # Color based on utilization (red = high >85%, orange = 60-85%, green = <60%)
         def get_color(util):
-            if util > 85:
-                return [255, 0, 0, 160]  # Red - high utilization
-            elif util > 60:
-                return [255, 165, 0, 160]  # Orange - moderate
+            util = min(util, 100)  # Cap at 100
+            if util >= 85:
+                return [220, 20, 60, 180]  # Crimson - high utilization (warning)
+            elif util >= 60:
+                return [255, 165, 0, 180]  # Orange - moderate (watch)
             else:
-                return [0, 255, 0, 160]  # Green - low
+                return [34, 139, 34, 180]  # Forest green - good (optimal)
         
         heatmap_data['color'] = heatmap_data['UTILIZATION_PCT'].apply(get_color)
         

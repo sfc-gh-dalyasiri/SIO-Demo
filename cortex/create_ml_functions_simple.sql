@@ -24,9 +24,12 @@ AS
 $$
     SELECT 
         r.REGION_NAME,
-        -- Simple efficiency score based on source efficiency and utilization
-        ROUND((AVG(ws.EFFICIENCY_PERCENT) + 
-              LEAST((SUM(ws.CURRENT_LEVEL_M3) / NULLIF(SUM(ws.CAPACITY_M3), 0)) * 50, 50)) * 0.8, 2) AS EFFICIENCY_SCORE,
+        -- Simple efficiency score based on source efficiency and utilization (capped at 100)
+        LEAST(
+            ROUND((AVG(ws.EFFICIENCY_PERCENT) + 
+                  LEAST((SUM(ws.CURRENT_LEVEL_M3) / NULLIF(SUM(ws.CAPACITY_M3), 0)) * 50, 50)) * 0.8, 2),
+            100.0
+        ) AS EFFICIENCY_SCORE,
         CASE 
             WHEN AVG(ws.EFFICIENCY_PERCENT) >= 85 THEN 'EXCELLENT'
             WHEN AVG(ws.EFFICIENCY_PERCENT) >= 70 THEN 'GOOD'

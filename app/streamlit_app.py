@@ -370,15 +370,20 @@ with tab2:
         
         heatmap_data['color'] = heatmap_data['UTILIZATION_PCT'].apply(get_color)
         
-        # Size based on usage (scaled down)
-        heatmap_data['size'] = heatmap_data['TOTAL_USAGE_M3'] / 50
+        # Size in meters - normalized to 30000-100000m range for visibility
+        min_usage = heatmap_data['TOTAL_USAGE_M3'].min()
+        max_usage = heatmap_data['TOTAL_USAGE_M3'].max()
+        if max_usage > min_usage:
+            heatmap_data['size'] = 30000 + ((heatmap_data['TOTAL_USAGE_M3'] - min_usage) / (max_usage - min_usage)) * 70000
+        else:
+            heatmap_data['size'] = 50000
         
         st.map(heatmap_data, 
                latitude='lat',
                longitude='lon', 
                size='size',
                color='color',
-               zoom=5)
+               zoom=6)
     else:
         st.info("Map requires regional data")
 

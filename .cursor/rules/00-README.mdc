@@ -1,0 +1,468 @@
+---
+alwaysApply: true
+---
+
+# Snowflake Cortex AI Project Guidelines
+
+This directory contains comprehensive guidelines for building production-ready Snowflake Cortex AI projects, distilled from real-world implementation experience.
+
+## 📚 Documentation Structure
+
+Read these guides in order for building a new Cortex AI project:
+
+### Getting Started
+
+1. **[01-overview.mdc](01-overview.mdc)** - Start here
+   - What is Snowflake Cortex?
+   - Key components and architecture
+   - Prerequisites and setup
+   - Project structure recommendations
+
+### Core Setup
+
+2. **[02-database-setup.mdc](02-database-setup.mdc)** - Database infrastructure
+   - Creating databases, schemas, warehouses programmatically
+   - Using Snow CLI vs Python
+   - Loading data (CSV, synthetic, PDF)
+   - Verification and troubleshooting
+
+3. **[03-semantic-models.mdc](03-semantic-models.mdc)** - Defining your data
+   - Semantic model structure (YAML)
+   - Tables, dimensions, facts, relationships
+   - Verified queries for consistent results
+   - Best practices and common patterns
+
+4. **[04-cortex-agents.mdc](04-cortex-agents.mdc)** - Creating agents
+   - Agent architecture and components
+   - Instructions (response, orchestration, samples)
+   - Tool configuration (Analyst, Search, Custom)
+   - Common issues and solutions
+
+### Advanced Features
+
+5. **[05-cortex-search.mdc](05-cortex-search.mdc)** - Document search (RAG)
+   - Setting up Cortex Search services
+   - Loading and indexing documents
+   - Embedding models
+   - Integration with agents
+
+6. **[06-custom-tools.mdc](06-custom-tools.mdc)** - Python UDFs and procedures
+   - Creating Python functions
+   - Stored procedures with database access
+   - Adding custom tools to agents
+   - Error handling patterns
+
+### Integration & Testing
+
+7. **[07-api-integration.mdc](07-api-integration.mdc)** - REST API client
+   - Building Python clients
+   - Streaming responses (SSE)
+   - Conversation history management
+   - Error handling and rate limiting
+
+8. **[08-testing-strategy.mdc](08-testing-strategy.mdc)** - Comprehensive testing
+   - Infrastructure tests (SQL)
+   - Component tests (Python)
+   - Integration and end-to-end tests
+   - Edge cases and performance
+
+9. **[09-common-patterns.mdc](09-common-patterns.mdc)** - Best practices
+   - Critical gotchas and solutions
+   - Proven patterns from production
+   - Security and performance checklist
+   - Debugging techniques
+
+## 🎯 Quick Reference
+
+### For First-Time Setup
+```bash
+# 1. Read overview
+# 2. Setup database (02-database-setup.mdc)
+# 3. Create semantic model (03-semantic-models.mdc)
+# 4. Create agent (04-cortex-agents.mdc)
+# 5. Test everything (08-testing-strategy.mdc)
+```
+
+### For Adding Features
+- **Add data querying**: See 03-semantic-models.mdc
+- **Add document search**: See 05-cortex-search.mdc
+- **Add custom actions**: See 06-custom-tools.mdc
+
+### For Integration
+- **Build API client**: See 07-api-integration.mdc
+- **Handle conversations**: See 07-api-integration.mdc (ConversationManager)
+- **Stream responses**: See 07-api-integration.mdc (Streaming)
+
+### For Troubleshooting
+- **Agent not working**: See 04-cortex-agents.mdc (Common Issues)
+- **Search not returning results**: See 05-cortex-search.mdc (Troubleshooting)
+- **Custom functions failing**: See 06-custom-tools.mdc (Common Issues)
+- **API errors**: See 07-api-integration.mdc (Error Handling)
+
+## ⚠️ Critical Things to Know
+
+### Must-Know Gotchas
+
+1. **Cortex Analyst requires `execution_environment`** - Always include warehouse config
+2. **Use `search_service` not `cortex_search_service`** - Field name matters
+3. **Custom function parameters must be UPPERCASE** - In input_schema
+4. **Tool type vs resource type** - Use `"type": "generic"` in tool_spec, then specify function/procedure in resources
+5. **Test infrastructure first** - Don't debug agent if database isn't set up correctly
+
+See [09-common-patterns.mdc](09-common-patterns.mdc) for complete list.
+
+## 🔑 Key Technologies
+
+- **Snowflake CLI** (`snow`) - Recommended for SQL execution
+- **Python 3.10+** - For custom tools and API integration
+- **YAML** - For semantic model definitions
+- **REST API** - For agent interaction
+- **Personal Access Token (PAT)** - For authentication
+
+## 📖 What's NOT Included
+
+These guides focus on **core Snowflake Cortex capabilities**. They do NOT cover:
+- Application-specific integrations (WhatsApp, Slack, etc.)
+- UI/UX frameworks
+- Deployment platforms (AWS, GCP, Azure)
+- CI/CD pipelines
+- Production monitoring tools
+
+For those topics, refer to the main project documentation.
+
+## 🚀 Typical Development Flow
+
+```
+1. Design Phase
+   ├─ Define use cases
+   ├─ Identify data sources
+   └─ Plan tools needed
+
+2. Database Setup
+   ├─ Create schemas
+   ├─ Load data
+   └─ Test connections
+
+3. Semantic Model
+   ├─ Define tables/columns
+   ├─ Add synonyms
+   └─ Create verified queries
+
+4. Optional: Cortex Search
+   ├─ Load documents
+   └─ Create search service
+
+5. Optional: Custom Tools
+   ├─ Create functions/procedures
+   └─ Test independently
+
+6. Agent Creation
+   ├─ Write instructions
+   ├─ Configure tools
+   └─ Create agent
+
+7. Testing
+   ├─ Infrastructure tests
+   ├─ Component tests
+   ├─ Integration tests
+   └─ Edge cases
+
+8. Integration
+   ├─ Build API client
+   ├─ Handle streaming
+   └─ Manage conversations
+
+9. Production
+   ├─ Security review
+   ├─ Performance optimization
+   └─ Monitoring setup
+```
+
+## 📊 Documentation Source
+
+These guidelines are based on a real-world implementation:
+- **Project**: Al Fardan Exchange AI Banking Assistant  
+- **Tech Stack**: Snowflake Cortex, WhatsApp Business API
+- **Scale**: Multi-user (retail + business), 11 currencies, RAG knowledge base
+- **Features**: Text-to-SQL, document search, money transfers, real-time streaming
+
+Key learnings extracted and generalized for any Cortex AI project.
+
+## 🤝 Contributing
+
+When adding new patterns or learnings:
+1. Add to appropriate numbered guide
+2. Include code examples
+3. Explain why (not just how)
+4. Add to common-patterns if it's a gotcha
+
+## 📞 Getting Help
+
+If you encounter issues:
+1. Check the specific guide's "Common Issues" section
+2. Review [09-common-patterns.mdc](09-common-patterns.mdc)
+3. Verify against official Snowflake docs
+4. Check your infrastructure setup (database, warehouse, etc.)
+
+## 🎓 Learning Path
+
+**Beginner** (Never used Cortex):
+- Read: 01, 02, 03, 04
+- Build: Simple agent with Cortex Analyst only
+- Test: Infrastructure and basic queries
+
+**Intermediate** (Built basic agent):
+- Read: 05, 06, 07
+- Build: Add search and custom functions
+- Test: Integration and multi-turn conversations
+
+**Advanced** (Production-ready):
+- Read: 08, 09
+- Build: Complete test suite
+- Deploy: Production with monitoring
+
+## 📅 Maintenance
+
+These guidelines should be updated when:
+- Snowflake releases new Cortex features
+- New patterns emerge from production usage
+- Common issues are discovered and solved
+- Best practices evolve
+
+---
+
+**Happy building with Snowflake Cortex AI! 🚀**
+
+Last Updated: October 2025
+# Snowflake Cortex AI Project Guidelines
+
+This directory contains comprehensive guidelines for building production-ready Snowflake Cortex AI projects, distilled from real-world implementation experience.
+
+## 📚 Documentation Structure
+
+Read these guides in order for building a new Cortex AI project:
+
+### Getting Started
+
+1. **[01-overview.mdc](01-overview.mdc)** - Start here
+   - What is Snowflake Cortex?
+   - Key components and architecture
+   - Prerequisites and setup
+   - Project structure recommendations
+
+### Core Setup
+
+2. **[02-database-setup.mdc](02-database-setup.mdc)** - Database infrastructure
+   - Creating databases, schemas, warehouses programmatically
+   - Using Snow CLI vs Python
+   - Loading data (CSV, synthetic, PDF)
+   - Verification and troubleshooting
+
+3. **[03-semantic-models.mdc](03-semantic-models.mdc)** - Defining your data
+   - Semantic model structure (YAML)
+   - Tables, dimensions, facts, relationships
+   - Verified queries for consistent results
+   - Best practices and common patterns
+
+4. **[04-cortex-agents.mdc](04-cortex-agents.mdc)** - Creating agents
+   - Agent architecture and components
+   - Instructions (response, orchestration, samples)
+   - Tool configuration (Analyst, Search, Custom)
+   - Common issues and solutions
+
+### Advanced Features
+
+5. **[05-cortex-search.mdc](05-cortex-search.mdc)** - Document search (RAG)
+   - Setting up Cortex Search services
+   - Loading and indexing documents
+   - Embedding models
+   - Integration with agents
+
+6. **[06-custom-tools.mdc](06-custom-tools.mdc)** - Python UDFs and procedures
+   - Creating Python functions
+   - Stored procedures with database access
+   - Adding custom tools to agents
+   - Error handling patterns
+
+### Integration & Testing
+
+7. **[07-api-integration.mdc](07-api-integration.mdc)** - REST API client
+   - Building Python clients
+   - Streaming responses (SSE)
+   - Conversation history management
+   - Error handling and rate limiting
+
+8. **[08-testing-strategy.mdc](08-testing-strategy.mdc)** - Comprehensive testing
+   - Infrastructure tests (SQL)
+   - Component tests (Python)
+   - Integration and end-to-end tests
+   - Edge cases and performance
+
+9. **[09-common-patterns.mdc](09-common-patterns.mdc)** - Best practices
+   - Critical gotchas and solutions
+   - Proven patterns from production
+   - Security and performance checklist
+   - Debugging techniques
+
+## 🎯 Quick Reference
+
+### For First-Time Setup
+```bash
+# 1. Read overview
+# 2. Setup database (02-database-setup.mdc)
+# 3. Create semantic model (03-semantic-models.mdc)
+# 4. Create agent (04-cortex-agents.mdc)
+# 5. Test everything (08-testing-strategy.mdc)
+```
+
+### For Adding Features
+- **Add data querying**: See 03-semantic-models.mdc
+- **Add document search**: See 05-cortex-search.mdc
+- **Add custom actions**: See 06-custom-tools.mdc
+
+### For Integration
+- **Build API client**: See 07-api-integration.mdc
+- **Handle conversations**: See 07-api-integration.mdc (ConversationManager)
+- **Stream responses**: See 07-api-integration.mdc (Streaming)
+
+### For Troubleshooting
+- **Agent not working**: See 04-cortex-agents.mdc (Common Issues)
+- **Search not returning results**: See 05-cortex-search.mdc (Troubleshooting)
+- **Custom functions failing**: See 06-custom-tools.mdc (Common Issues)
+- **API errors**: See 07-api-integration.mdc (Error Handling)
+
+## ⚠️ Critical Things to Know
+
+### Must-Know Gotchas
+
+1. **Cortex Analyst requires `execution_environment`** - Always include warehouse config
+2. **Use `search_service` not `cortex_search_service`** - Field name matters
+3. **Custom function parameters must be UPPERCASE** - In input_schema
+4. **Tool type vs resource type** - Use `"type": "generic"` in tool_spec, then specify function/procedure in resources
+5. **Test infrastructure first** - Don't debug agent if database isn't set up correctly
+
+See [09-common-patterns.mdc](09-common-patterns.mdc) for complete list.
+
+## 🔑 Key Technologies
+
+- **Snowflake CLI** (`snow`) - Recommended for SQL execution
+- **Python 3.10+** - For custom tools and API integration
+- **YAML** - For semantic model definitions
+- **REST API** - For agent interaction
+- **Personal Access Token (PAT)** - For authentication
+
+## 📖 What's NOT Included
+
+These guides focus on **core Snowflake Cortex capabilities**. They do NOT cover:
+- Application-specific integrations (WhatsApp, Slack, etc.)
+- UI/UX frameworks
+- Deployment platforms (AWS, GCP, Azure)
+- CI/CD pipelines
+- Production monitoring tools
+
+For those topics, refer to the main project documentation.
+
+## 🚀 Typical Development Flow
+
+```
+1. Design Phase
+   ├─ Define use cases
+   ├─ Identify data sources
+   └─ Plan tools needed
+
+2. Database Setup
+   ├─ Create schemas
+   ├─ Load data
+   └─ Test connections
+
+3. Semantic Model
+   ├─ Define tables/columns
+   ├─ Add synonyms
+   └─ Create verified queries
+
+4. Optional: Cortex Search
+   ├─ Load documents
+   └─ Create search service
+
+5. Optional: Custom Tools
+   ├─ Create functions/procedures
+   └─ Test independently
+
+6. Agent Creation
+   ├─ Write instructions
+   ├─ Configure tools
+   └─ Create agent
+
+7. Testing
+   ├─ Infrastructure tests
+   ├─ Component tests
+   ├─ Integration tests
+   └─ Edge cases
+
+8. Integration
+   ├─ Build API client
+   ├─ Handle streaming
+   └─ Manage conversations
+
+9. Production
+   ├─ Security review
+   ├─ Performance optimization
+   └─ Monitoring setup
+```
+
+## 📊 Documentation Source
+
+These guidelines are based on a real-world implementation:
+- **Project**: Al Fardan Exchange AI Banking Assistant  
+- **Tech Stack**: Snowflake Cortex, WhatsApp Business API
+- **Scale**: Multi-user (retail + business), 11 currencies, RAG knowledge base
+- **Features**: Text-to-SQL, document search, money transfers, real-time streaming
+
+Key learnings extracted and generalized for any Cortex AI project.
+
+## 🤝 Contributing
+
+When adding new patterns or learnings:
+1. Add to appropriate numbered guide
+2. Include code examples
+3. Explain why (not just how)
+4. Add to common-patterns if it's a gotcha
+
+## 📞 Getting Help
+
+If you encounter issues:
+1. Check the specific guide's "Common Issues" section
+2. Review [09-common-patterns.mdc](09-common-patterns.mdc)
+3. Verify against official Snowflake docs
+4. Check your infrastructure setup (database, warehouse, etc.)
+
+## 🎓 Learning Path
+
+**Beginner** (Never used Cortex):
+- Read: 01, 02, 03, 04
+- Build: Simple agent with Cortex Analyst only
+- Test: Infrastructure and basic queries
+
+**Intermediate** (Built basic agent):
+- Read: 05, 06, 07
+- Build: Add search and custom functions
+- Test: Integration and multi-turn conversations
+
+**Advanced** (Production-ready):
+- Read: 08, 09
+- Build: Complete test suite
+- Deploy: Production with monitoring
+
+## 📅 Maintenance
+
+These guidelines should be updated when:
+- Snowflake releases new Cortex features
+- New patterns emerge from production usage
+- Common issues are discovered and solved
+- Best practices evolve
+
+---
+
+**Happy building with Snowflake Cortex AI! 🚀**
+
+Last Updated: October 2025

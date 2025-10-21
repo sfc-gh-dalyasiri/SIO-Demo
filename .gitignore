@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+.env.local
+*.toml
+
+# Data files
+data/*.csv
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Logs
+*.log
+

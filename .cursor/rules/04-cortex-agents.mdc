@@ -1,0 +1,581 @@
+# Creating Cortex Agents
+
+This guide covers creating and configuring Snowflake Cortex Agents - the orchestration layer that combines multiple tools.
+
+## Agent Architecture
+
+```
+User Query → Agent → [Tool Selection] → Tool Execution → Response
+                     ├─ Cortex Analyst (SQL)
+                     ├─ Cortex Search (RAG)
+                     └─ Custom Functions
+```
+
+## Creating an Agent (SQL Method - Recommended)
+
+### Basic Agent with Single Tool
+
+**File**: `cortex/create_agent.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE SNOWFLAKE_INTELLIGENCE;  -- Required for agents
+USE SCHEMA AGENTIC;                    -- Required for agents
+USE WAREHOUSE MY_WAREHOUSE;
+
+CREATE OR REPLACE AGENT MY_APP_AGENT
+WITH PROFILE='{ "display_name": "My Application Assistant" }'
+    COMMENT='AI assistant for my application'
+FROM SPECIFICATION $$
+{
+  "models": {
+    "orchestration": "claude-4-sonnet"
+  },
+  "instructions": {
+    "response": "You are a helpful assistant. Be concise and professional.",
+    "orchestration": "Use the analyst tool to query data when users ask about metrics or records.",
+    "sample_questions": [
+      {"question": "What is the total revenue?"},
+      {"question": "How many customers do we have?"}
+    ]
+  },
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "cortex_analyst_text_to_sql",
+        "name": "data_analyst",
+        "description": "Query database for metrics, reports, and data analysis"
+      }
+    }
+  ],
+  "tool_resources": {
+    "data_analyst": {
+      "semantic_model_file": "@MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE/semantic_model.yaml",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE"
+      }
+    }
+  }
+}
+$$;
+
+-- Grant permissions
+GRANT USAGE ON AGENT SNOWFLAKE_INTELLIGENCE.AGENTIC.MY_APP_AGENT TO ROLE ACCOUNTADMIN;
+
+SELECT 'Agent created successfully!' AS STATUS;
+```
+
+**Execute**:
+```bash
+snow sql -f cortex/create_agent.sql
+```
+
+### Complete Agent with All Tool Types
+
+**File**: `cortex/create_agent_complete.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE SNOWFLAKE_INTELLIGENCE;
+USE SCHEMA AGENTIC;
+USE WAREHOUSE MY_WAREHOUSE;
+
+CREATE OR REPLACE AGENT MY_APP_AGENT
+WITH PROFILE='{ "display_name": "My Application Assistant" }'
+    COMMENT='Full-featured AI assistant with multiple tools'
+FROM SPECIFICATION $$
+{
+  "models": {
+    "orchestration": "mistral-large2"
+  },
+  "instructions": {
+    "response": "You are a helpful, professional assistant. Keep responses concise (2-3 sentences for simple queries). Use bullet points for lists. Always include units with numbers.",
+    
+    "orchestration": "Tool Selection Logic:\n1. Data queries (balance, transactions, metrics) → Use data_analyst\n2. General information, FAQs, policies → Use knowledge_search\n3. Execute actions (transfer, update) → Use custom functions\n4. Complex queries may require multiple tools in sequence",
+    
+    "sample_questions": [
+      {"question": "What is my account balance?"},
+      {"question": "How does the system work?"},
+      {"question": "Transfer $100 to account 12345"},
+      {"question": "Show me transaction trends for last month"}
+    ]
+  },
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "cortex_analyst_text_to_sql",
+        "name": "data_analyst",
+        "description": "Query structured database for metrics, reports, account information, and analytics"
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "cortex_search",
+        "name": "knowledge_search",
+        "description": "Search knowledge base for FAQs, documentation, policies, and how-to guides"
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "transfer_money",
+        "description": "Execute money transfer between accounts. Always ask for user confirmation before executing.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "AMOUNT": {
+              "description": "Amount to transfer (positive number)",
+              "type": "number"
+            },
+            "FROM_ACCOUNT": {
+              "description": "Source account number",
+              "type": "string"
+            },
+            "TO_ACCOUNT": {
+              "description": "Destination account number",
+              "type": "string"
+            }
+          },
+          "required": ["AMOUNT", "FROM_ACCOUNT", "TO_ACCOUNT"]
+        }
+      }
+    }
+  ],
+  "tool_resources": {
+    "data_analyst": {
+      "semantic_model_file": "@MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE/semantic_model.yaml",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE"
+      }
+    },
+    "knowledge_search": {
+      "search_service": "MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE",
+      "max_results": 5,
+      "id_column": "DOCUMENT_ID",
+      "title_column": "TITLE"
+    },
+    "transfer_money": {
+      "type": "function",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE",
+        "query_timeout": 30
+      },
+      "identifier": "MY_APP_DB.OPERATIONS.TRANSFER_MONEY"
+    }
+  }
+}
+$$;
+
+GRANT USAGE ON AGENT SNOWFLAKE_INTELLIGENCE.AGENTIC.MY_APP_AGENT TO ROLE ACCOUNTADMIN;
+
+SELECT 'Complete agent created successfully!' AS STATUS;
+```
+
+## Agent Specification Components
+
+### 1. Models Section
+
+```json
+{
+  "models": {
+    "orchestration": "mistral-large2"
+  }
+}
+```
+
+**Supported Models**:
+- `mistral-large2` (recommended - best performance)
+- `mistral-large`
+- Other Cortex-supported LLMs
+
+### 2. Instructions Section
+
+#### Response Instructions
+```json
+{
+  "response": "Define tone, style, format, length, and any special requirements"
+}
+```
+
+**Best Practices**:
+- Define tone (professional, friendly, concise)
+- Specify response length (e.g., "2-3 sentences for simple queries")
+- Mention formatting preferences (bullet points, tables)
+- Include emoji usage policy
+- Specify units/currency symbols to use
+
+**Example**:
+```json
+{
+  "response": "You are a banking assistant. Be professional, concise (2-3 sentences), and always include currency symbols (AED) with amounts. Use emojis sparingly (✅, 💰). If you can't help, offer to connect them with support."
+}
+```
+
+#### Orchestration Instructions
+```json
+{
+  "orchestration": "Explain when and how to use each tool"
+}
+```
+
+**Best Practices**:
+- Clearly define tool selection criteria
+- Explain tool ordering for multi-tool queries
+- Include any business logic or rules
+- Mention when to ask for confirmation
+
+**Example**:
+```json
+{
+  "orchestration": "Tool Selection:\n1. Personal queries (my balance, my transactions) → filter by customer_id\n2. Business queries (total volume, all customers) → no filter\n3. Data queries → data_analyst\n4. General info → knowledge_search\n5. Transfers/updates → custom functions (always confirm first)\n\nAlways use data_analyst for numeric/analytical questions."
+}
+```
+
+#### Sample Questions
+```json
+{
+  "sample_questions": [
+    {"question": "Example query 1"},
+    {"question": "Example query 2"}
+  ]
+}
+```
+
+**Best Practices**:
+- Include 4-6 diverse examples
+- Cover all tool types
+- Mix simple and complex queries
+- Include edge cases
+
+### 3. Tools Section
+
+#### Cortex Analyst Tool
+
+```json
+{
+  "tool_spec": {
+    "type": "cortex_analyst_text_to_sql",
+    "name": "tool_name",
+    "description": "Clear description of when to use this tool"
+  }
+}
+```
+
+#### Cortex Search Tool
+
+```json
+{
+  "tool_spec": {
+    "type": "cortex_search",
+    "name": "tool_name",
+    "description": "Clear description of what documents this searches"
+  }
+}
+```
+
+#### Generic (Custom Function) Tool
+
+```json
+{
+  "tool_spec": {
+    "type": "generic",
+    "name": "tool_name",
+    "description": "What this function does and when to use it",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "PARAM_NAME": {
+          "description": "Parameter description",
+          "type": "string|number|boolean"
+        }
+      },
+      "required": ["REQUIRED_PARAM"]
+    }
+  }
+}
+```
+
+**Critical**: Parameter names must be UPPERCASE in `input_schema`.
+
+### 4. Tool Resources Section
+
+#### Cortex Analyst Resources
+
+```json
+{
+  "tool_name": {
+    "semantic_model_file": "@DATABASE.SCHEMA.STAGE/model.yaml",
+    "execution_environment": {
+      "type": "warehouse",
+      "warehouse": "WAREHOUSE_NAME"
+    }
+  }
+}
+```
+
+**⚠️ CRITICAL**: `execution_environment` is MANDATORY for Cortex Analyst.
+
+#### Cortex Search Resources
+
+```json
+{
+  "tool_name": {
+    "search_service": "DATABASE.SCHEMA.SERVICE_NAME",
+    "max_results": 5,
+    "id_column": "DOCUMENT_ID",
+    "title_column": "TITLE"
+  }
+}
+```
+
+**⚠️ CRITICAL**: Use `search_service` not `cortex_search_service`.
+
+#### Custom Function Resources
+
+```json
+{
+  "tool_name": {
+    "type": "function",
+    "execution_environment": {
+      "type": "warehouse",
+      "warehouse": "WAREHOUSE_NAME",
+      "query_timeout": 30
+    },
+    "identifier": "DATABASE.SCHEMA.FUNCTION_NAME"
+  }
+}
+```
+
+**For Stored Procedures**: Use `"type": "procedure"` instead of `"type": "function"`.
+
+## Managing Agents
+
+### View Agent Details
+
+```sql
+-- List all agents
+SHOW AGENTS;
+
+-- Show specific agent
+SHOW AGENTS LIKE 'MY_APP_AGENT';
+
+-- Get agent specification
+DESCRIBE AGENT SNOWFLAKE_INTELLIGENCE.AGENTIC.MY_APP_AGENT;
+```
+
+### Update Agent
+
+To update an agent, simply re-run the CREATE OR REPLACE statement:
+
+```bash
+# Edit cortex/create_agent.sql
+# Then re-run:
+snow sql -f cortex/create_agent.sql
+```
+
+### Delete Agent
+
+```sql
+DROP AGENT IF EXISTS SNOWFLAKE_INTELLIGENCE.AGENTIC.MY_APP_AGENT;
+```
+
+## Testing Agents
+
+### Method 1: Via Snow CLI
+
+```bash
+# Simple test query
+snow sql -q "SELECT SNOWFLAKE_INTELLIGENCE.AGENTIC.MY_APP_AGENT('What is my balance?');"
+```
+
+### Method 2: Via Python (REST API)
+
+**File**: `tests/test_agent.py`
+
+```python
+#!/usr/bin/env python3
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+HOST = os.getenv('SNOWFLAKE_HOST')
+PAT = os.getenv('SNOWFLAKE_PAT')
+
+url = f"https://{HOST}/api/v2/databases/SNOWFLAKE_INTELLIGENCE/schemas/AGENTS/agents/MY_APP_AGENT:run"
+
+headers = {
+    "Authorization": f"Bearer {PAT}",
+    "Content-Type": "application/json"
+}
+
+# Note: Schema is AGENTS (not AGENTIC) - verify with SHOW AGENTS;
+
+def test_query(query):
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": query}]
+            }
+        ]
+    }
+    
+    response = requests.post(url, headers=headers, json=payload)
+    
+    if response.status_code == 200:
+        result = response.json()
+        print(f"\n✅ Query: {query}")
+        print(f"Response: {result['message']['content'][0]['text']}")
+    else:
+        print(f"\n❌ Error: {response.status_code}")
+        print(response.text)
+
+# Test queries
+test_query("What is my account balance?")
+test_query("How many customers do we have?")
+test_query("What are the FAQs?")
+```
+
+**Run**:
+```bash
+python tests/test_agent.py
+```
+
+## Common Issues & Solutions
+
+### Issue 1: "execution_environment not populated"
+
+**Error**: `execution_environment not populated for analyst tool`
+
+**Cause**: Missing warehouse configuration for Cortex Analyst
+
+**Solution**:
+```json
+{
+  "tool_resources": {
+    "data_analyst": {
+      "semantic_model_file": "@...",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE"
+      }
+    }
+  }
+}
+```
+
+### Issue 2: "search_service field not provided"
+
+**Error**: `The field "search_service" is not provided for Cortex Search`
+
+**Cause**: Wrong field name
+
+**Solution**: Use `search_service` not `cortex_search_service`
+
+### Issue 3: "Tool type function is not valid"
+
+**Error**: `399504: Tool type function is not valid`
+
+**Cause**: Mismatch between tool_spec type and tool_resources type
+
+**Solution**:
+```json
+{
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "generic",  // ← Must be "generic"
+        "name": "my_function"
+      }
+    }
+  ],
+  "tool_resources": {
+    "my_function": {
+      "type": "function",  // ← Correct pairing
+      "identifier": "DB.SCHEMA.FUNCTION_NAME"
+    }
+  }
+}
+```
+
+### Issue 4: Agent returns empty responses
+
+**Debugging**:
+1. Test each tool independently
+2. Check semantic model uploaded: `LS @STAGE/model.yaml`
+3. Verify search service exists: `SHOW CORTEX SEARCH SERVICES`
+4. Verify functions exist: `SHOW FUNCTIONS`
+5. Check warehouse is running: `SHOW WAREHOUSES`
+
+### Issue 5: "Cannot create agent because spec is invalid"
+
+**Common invalid fields**:
+- `default_tool_choice` (not supported)
+- `max_iterations` (not supported)
+- Typos in field names
+
+**Solution**: Compare against working examples, remove unsupported fields
+
+## Best Practices
+
+### 1. Clear Tool Descriptions
+
+Help the agent choose the right tool:
+
+```json
+// ❌ BAD
+{"description": "Analyst tool"}
+
+// ✅ GOOD
+{"description": "Query structured database for account balances, transaction history, customer metrics, and financial analytics"}
+```
+
+### 2. Comprehensive Instructions
+
+Don't leave tool selection ambiguous:
+
+```json
+{
+  "orchestration": "Use data_analyst for: account balances, transaction history, metrics, reports, analytics.\n\nUse knowledge_search for: FAQs, policies, procedures, how-to guides, general information.\n\nUse custom functions for: executing actions like transfers, updates, exchanges. Always ask for confirmation first."
+}
+```
+
+### 3. Sample Questions Coverage
+
+Include examples for all scenarios:
+
+```json
+{
+  "sample_questions": [
+    {"question": "What is my balance?"},              // Simple query
+    {"question": "Show last 10 transactions"},        // With limit
+    {"question": "What is the transfer policy?"},     // Knowledge base
+    {"question": "Transfer $500 to account 123"},     // Action
+    {"question": "Compare revenue vs last month"}     // Complex analytics
+  ]
+}
+```
+
+### 4. Error Handling in Instructions
+
+Tell the agent how to handle errors:
+
+```json
+{
+  "response": "If you encounter an error or can't find information, apologize and offer alternatives. For actions, always confirm details before executing. If transfer fails, explain why and suggest next steps."
+}
+```
+
+## Next Steps
+
+After creating your agent:
+1. Test extensively (see `08-testing-strategy.md`)
+2. Integrate with your application (see `07-api-integration.md`)
+3. Monitor performance and iterate on instructions
+4. Add more tools as needed
+

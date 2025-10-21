@@ -1,0 +1,36 @@
+---
+description: Git workflow and commit message standards
+alwaysApply: false
+---
+# Git Workflow Rules
+
+## Commit Message Guidelines
+- Keep messages concise (maximum 72 characters for first line)
+- No emojis - use plain text only
+- Be descriptive but brief - explain what changed, not why
+- Use present tense - "Add feature" not "Added feature" 
+- Start with action verb - Add, Fix, Update, Remove, etc.
+
+## Examples of Good Commits
+- `Add plotly fallback charts`
+- `Fix import error in utils module`
+- `Update requirements for Streamlit deployment`
+- `Remove deprecated configuration`
+
+## Examples of Bad Commits
+- `🔧 FIX: Plotly dependency...` (too long, emojis)
+- `Fixed some stuff` (not descriptive)
+- `Added the ability to handle...` (too verbose)
+
+## Branch Structure
+- `main` branch: Contains existing Streamlit application
+- `git-streamlit-integration` branch: SnowCLI config and Git integration setup
+- Repository: `https://github.com/sfc-gh-dalyasiri/HR_AI_Demo`
+
+## Development Process
+1. Make changes locally
+2. Test in local environment: `streamlit run streamlit_app.py`
+3. Commit with proper message format
+4. Push to GitHub: `git push`
+5. Changes auto-sync to Snowflake Git repository
+6. Refresh/restart Streamlit app in Snowsight to see updates

@@ -1,0 +1,170 @@
+# Snowflake Cortex AI Projects - Overview
+
+This guide provides comprehensive knowledge for building production-ready Snowflake Cortex AI projects, distilled from real-world implementation experience.
+
+## What is Snowflake Cortex?
+
+Snowflake Cortex is an intelligent AI layer that provides:
+
+1. **Cortex Agents** - AI orchestration layer that can:
+   - Query structured data using natural language (via Cortex Analyst)
+   - Search unstructured documents (via Cortex Search/RAG)
+   - Execute custom business logic (Python UDFs, Stored Procedures)
+   - Combine multiple tools intelligently based on user queries
+
+2. **Cortex Analyst** - Text-to-SQL engine that:
+   - Converts natural language to SQL queries
+   - Uses semantic models to understand your data schema
+   - Supports verified queries for consistent results
+   - Can handle complex analytical queries
+
+3. **Cortex Search** - RAG (Retrieval-Augmented Generation) that:
+   - Indexes unstructured documents
+   - Performs semantic search
+   - Returns relevant context for LLM responses
+
+## Key Components of a Cortex AI Project
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Cortex Agent                              │
+├─────────────────────────────────────────────────────────────┤
+│  Instructions                                                │
+│  ├─ response: How to format responses                       │
+│  ├─ orchestration: Tool selection logic                     │
+│  └─ sample_questions: Example queries                       │
+├─────────────────────────────────────────────────────────────┤
+│  Tools                                                       │
+│  ├─ Cortex Analyst (Text-to-SQL)                           │
+│  │   └─ Semantic Model → Warehouse → Database              │
+│  ├─ Cortex Search (RAG)                                     │
+│  │   └─ Search Service → Documents                         │
+│  └─ Custom Functions                                        │
+│      └─ Python UDFs / Stored Procedures                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Typical Project Structure
+
+```
+project/
+├── data_engineering/
+│   ├── setup_database.sql         # Database, schemas, tables
+│   ├── generate_data.py           # Synthetic/demo data
+│   └── insert_data.sql            # Load data
+│
+├── cortex/
+│   ├── semantic_model.yaml        # Semantic model definition
+│   ├── create_agent.sql           # Agent creation SQL
+│   ├── create_search.sql          # Cortex Search setup
+│   └── create_custom_tools.sql    # UDFs/Procedures
+│
+├── app/
+│   ├── cortex_client.py           # REST API client
+│   └── main.py                    # Your application
+│
+├── tests/
+│   ├── test_infrastructure.sql    # SQL tests
+│   └── test_integration.py        # Python integration tests
+│
+└── docs/
+    ├── architecture.md
+    └── testing.md
+```
+
+## Development Workflow
+
+1. **Design Phase**
+   - Define your use cases
+   - Identify data sources (structured + unstructured)
+   - Determine what custom logic is needed
+   - Plan tool selection strategy
+
+2. **Database Setup**
+   - Create database and schemas
+   - Design table structure
+   - Create warehouses
+   - Load data (real or synthetic)
+
+3. **Tool Creation**
+   - Create semantic model for structured data
+   - Set up Cortex Search for documents
+   - Implement custom functions if needed
+
+4. **Agent Configuration**
+   - Write clear instructions
+   - Configure all tools
+   - Set up tool resources properly
+
+5. **Testing**
+   - Test infrastructure (SQL)
+   - Test each tool independently
+   - Test agent integration (Python)
+   - Test edge cases
+
+6. **Integration**
+   - Build application layer
+   - Handle streaming responses
+   - Implement error handling
+   - Add monitoring/logging
+
+## Key Technologies
+
+- **Snowflake CLI** (`snow`) - For executing SQL and managing resources
+- **REST API** - For agent interaction (can use SQL or API)
+- **Python** - For custom tools, testing, and integration
+- **YAML** - For semantic model definitions
+- **SQL** - For all Snowflake resource creation
+
+## Prerequisites
+
+- Snowflake account with Cortex enabled
+- `snow` CLI installed and configured
+- Python 3.10+
+- Basic SQL knowledge
+- Understanding of your data schema
+
+## Important Concepts
+
+### Personal Access Token (PAT)
+- Used for programmatic API access
+- Create in Snowsight: User → Settings → Personal Access Tokens
+- Has expiration date (plan for rotation)
+- Store securely (environment variables, secrets manager)
+
+### Warehouses
+- Compute resources for query execution
+- Required for Cortex Analyst and custom functions
+- Can be sized appropriately (X-SMALL to X-LARGE)
+- Support auto-suspend and auto-resume
+
+### Semantic Models
+- YAML files that define your data schema
+- Tell Cortex Analyst what data is available
+- Include tables, dimensions, facts, relationships
+- Support verified queries for consistent results
+- Must be uploaded to Snowflake stages
+
+### Agent Instructions
+- Critical for proper tool selection
+- Define tone, style, response format
+- Explain when to use each tool
+- Include context about your domain/business
+
+## Next Steps
+
+Proceed to the following guides in order:
+
+1. **Database Setup** - Create databases, warehouses, schemas programmatically
+2. **Semantic Models** - Define your data for Cortex Analyst
+3. **Cortex Agents** - Create and configure agents
+4. **Cortex Search** - Set up document search (RAG)
+5. **Custom Tools** - Create Python UDFs and procedures
+6. **API Integration** - Connect your application
+7. **Testing Strategy** - Comprehensive testing approach
+8. **Common Patterns** - Gotchas and best practices
+
+---
+
+**Note**: This guide excludes application-specific integrations (like WhatsApp). Focus is on core Snowflake Cortex capabilities that apply to any use case.
+

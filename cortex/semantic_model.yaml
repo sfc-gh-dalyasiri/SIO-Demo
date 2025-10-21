@@ -1,0 +1,524 @@
+name: sio_irrigation_model
+
+tables:
+  # ========================================================================
+  # REGIONS TABLE
+  # ========================================================================
+  - name: regions
+    description: Saudi provinces/regions with irrigation infrastructure
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: REGIONS
+    
+    dimensions:
+      - name: region_id
+        synonyms:
+          - region
+          - province
+          - area
+        description: Unique identifier for each Saudi province
+        expr: REGION_ID
+        data_type: NUMBER
+      
+      - name: region_name
+        synonyms:
+          - province name
+          - region
+          - area name
+          - location
+        description: Name of the Saudi province (in English)
+        expr: REGION_NAME
+        data_type: TEXT
+      
+      - name: region_name_ar
+        synonyms:
+          - arabic name
+          - المنطقة
+        description: Name of the province in Arabic
+        expr: REGION_NAME_AR
+        data_type: TEXT
+    
+    facts:
+      - name: population
+        synonyms:
+          - people
+          - residents
+        description: Population of the region
+        expr: POPULATION
+        data_type: NUMBER
+      
+      - name: agricultural_area_km2
+        synonyms:
+          - farm area
+          - agricultural land
+          - farming area
+        description: Total agricultural area in square kilometers
+        expr: AGRICULTURAL_AREA_KM2
+        data_type: NUMBER
+      
+      - name: water_capacity_m3
+        synonyms:
+          - water capacity
+          - total capacity
+          - max water
+        description: Total water storage capacity in cubic meters
+        expr: WATER_CAPACITY_M3
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - REGION_ID
+
+  # ========================================================================
+  # WATER_SOURCES TABLE
+  # ========================================================================
+  - name: water_sources
+    description: Water sources including reservoirs, wells, and treatment plants
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: WATER_SOURCES
+    
+    dimensions:
+      - name: source_id
+        synonyms:
+          - source
+          - water source
+        description: Unique identifier for each water source
+        expr: SOURCE_ID
+        data_type: NUMBER
+      
+      - name: source_name
+        synonyms:
+          - name
+          - facility name
+        description: Name of the water source facility
+        expr: SOURCE_NAME
+        data_type: TEXT
+      
+      - name: source_type
+        synonyms:
+          - type
+          - facility type
+          - kind
+        description: Type of water source (RESERVOIR, WELL, TREATMENT_PLANT, DESALINATION)
+        expr: SOURCE_TYPE
+        data_type: TEXT
+      
+      - name: status
+        synonyms:
+          - operational status
+          - condition
+        description: Current operational status (ACTIVE, MAINTENANCE)
+        expr: STATUS
+        data_type: TEXT
+      
+      - name: region_id
+        description: Region where the water source is located
+        expr: REGION_ID
+        data_type: NUMBER
+    
+    facts:
+      - name: capacity_m3
+        synonyms:
+          - capacity
+          - max capacity
+          - total capacity
+        description: Maximum storage capacity in cubic meters
+        expr: CAPACITY_M3
+        data_type: NUMBER
+      
+      - name: current_level_m3
+        synonyms:
+          - current level
+          - water level
+          - available water
+        description: Current water level in cubic meters
+        expr: CURRENT_LEVEL_M3
+        data_type: NUMBER
+      
+      - name: capacity_utilization
+        synonyms:
+          - utilization
+          - usage percent
+          - fill level
+        description: Percentage of capacity currently in use
+        expr: (CURRENT_LEVEL_M3 / CAPACITY_M3) * 100
+        data_type: NUMBER
+      
+      - name: efficiency_percent
+        synonyms:
+          - efficiency
+          - performance
+        description: Operational efficiency percentage
+        expr: EFFICIENCY_PERCENT
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - SOURCE_ID
+
+  # ========================================================================
+  # CUSTOMERS TABLE
+  # ========================================================================
+  - name: customers
+    description: Farmers and agricultural businesses using irrigation water
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: CUSTOMERS
+    
+    dimensions:
+      - name: customer_id
+        synonyms:
+          - customer
+          - farmer
+          - client
+          - account
+        description: Unique identifier for each customer
+        expr: CUSTOMER_ID
+        data_type: NUMBER
+      
+      - name: customer_name
+        synonyms:
+          - name
+          - farmer name
+          - client name
+        description: Name of the customer
+        expr: CUSTOMER_NAME
+        data_type: TEXT
+      
+      - name: customer_type
+        synonyms:
+          - type
+          - category
+          - business type
+        description: Type of customer (FARM, AGRICULTURAL_BUSINESS, INDUSTRIAL)
+        expr: CUSTOMER_TYPE
+        data_type: TEXT
+      
+      - name: crop_type
+        synonyms:
+          - crop
+          - crops
+          - what they grow
+        description: Type of crops grown
+        expr: CROP_TYPE
+        data_type: TEXT
+      
+      - name: account_status
+        synonyms:
+          - status
+          - account state
+        description: Account status (ACTIVE, SUSPENDED)
+        expr: ACCOUNT_STATUS
+        data_type: TEXT
+      
+      - name: region_id
+        description: Region where the customer is located
+        expr: REGION_ID
+        data_type: NUMBER
+    
+    facts:
+      - name: farm_size_hectares
+        synonyms:
+          - farm size
+          - land size
+          - area
+        description: Size of the farm in hectares
+        expr: FARM_SIZE_HECTARES
+        data_type: NUMBER
+      
+      - name: total_customers
+        synonyms:
+          - customer count
+          - number of customers
+        description: Total count of customers
+        expr: COUNT(*)
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - CUSTOMER_ID
+
+  # ========================================================================
+  # BILLING TABLE
+  # ========================================================================
+  - name: billing
+    description: Monthly water bills for customers
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: BILLING
+    
+    dimensions:
+      - name: bill_id
+        synonyms:
+          - bill
+          - invoice
+        description: Unique identifier for each bill
+        expr: BILL_ID
+        data_type: NUMBER
+      
+      - name: customer_id
+        synonyms:
+          - customer
+          - farmer
+        description: Customer who received the bill
+        expr: CUSTOMER_ID
+        data_type: NUMBER
+      
+      - name: billing_month
+        synonyms:
+          - month
+          - billing period
+          - period
+        description: Month of the billing period
+        expr: BILLING_MONTH
+        data_type: DATE
+      
+      - name: bill_status
+        synonyms:
+          - status
+          - payment status
+          - bill state
+        description: Status of the bill (PAID, PENDING, OVERDUE)
+        expr: BILL_STATUS
+        data_type: TEXT
+      
+      - name: due_date
+        synonyms:
+          - deadline
+          - payment due date
+        description: Date when payment is due
+        expr: DUE_DATE
+        data_type: DATE
+    
+    facts:
+      - name: usage_volume_m3
+        synonyms:
+          - water usage
+          - consumption
+          - volume used
+        description: Water volume used in cubic meters
+        expr: USAGE_VOLUME_M3
+        data_type: NUMBER
+      
+      - name: total_amount_sar
+        synonyms:
+          - amount
+          - bill amount
+          - total
+          - cost
+          - price
+        description: Total bill amount in Saudi Riyals
+        expr: TOTAL_AMOUNT_SAR
+        data_type: NUMBER
+      
+      - name: usage_charge_sar
+        synonyms:
+          - water charge
+          - usage fee
+        description: Charge for water usage in Saudi Riyals
+        expr: USAGE_CHARGE_SAR
+        data_type: NUMBER
+      
+      - name: service_fee_sar
+        synonyms:
+          - service charge
+          - admin fee
+        description: Monthly service fee in Saudi Riyals
+        expr: SERVICE_FEE_SAR
+        data_type: NUMBER
+      
+      - name: total_bills
+        synonyms:
+          - bill count
+          - number of bills
+        description: Total count of bills
+        expr: COUNT(*)
+        data_type: NUMBER
+      
+      - name: total_revenue
+        synonyms:
+          - revenue
+          - total income
+          - total amount
+        description: Total revenue from bills
+        expr: SUM(TOTAL_AMOUNT_SAR)
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - BILL_ID
+
+  # ========================================================================
+  # WATER_USAGE TABLE
+  # ========================================================================
+  - name: water_usage
+    description: Daily water consumption readings from smart meters
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: WATER_USAGE
+    
+    dimensions:
+      - name: reading_id
+        synonyms:
+          - reading
+          - measurement
+        description: Unique identifier for each meter reading
+        expr: READING_ID
+        data_type: NUMBER
+      
+      - name: meter_id
+        synonyms:
+          - meter
+          - water meter
+        description: Water meter that recorded the reading
+        expr: METER_ID
+        data_type: NUMBER
+      
+      - name: reading_date
+        synonyms:
+          - date
+          - when
+          - measurement date
+        description: Date of the water usage reading
+        expr: READING_DATE
+        data_type: DATE
+    
+    facts:
+      - name: volume_m3
+        synonyms:
+          - water volume
+          - usage
+          - consumption
+          - amount used
+        description: Water volume consumed in cubic meters
+        expr: VOLUME_M3
+        data_type: NUMBER
+      
+      - name: pressure_bar
+        synonyms:
+          - pressure
+          - water pressure
+        description: Water pressure in bars
+        expr: PRESSURE_BAR
+        data_type: NUMBER
+      
+      - name: flow_rate_m3_h
+        synonyms:
+          - flow rate
+          - flow
+        description: Water flow rate in cubic meters per hour
+        expr: FLOW_RATE_M3_H
+        data_type: NUMBER
+      
+      - name: total_usage
+        synonyms:
+          - total consumption
+          - total volume
+        description: Total water usage across all readings
+        expr: SUM(VOLUME_M3)
+        data_type: NUMBER
+      
+      - name: average_usage
+        synonyms:
+          - avg usage
+          - mean consumption
+        description: Average water usage
+        expr: AVG(VOLUME_M3)
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - READING_ID
+
+# ========================================================================
+# VERIFIED QUERIES
+# ========================================================================
+verified_queries:
+  - name: overdue_bills
+    question: Which customers haven't paid their bills?
+    sql: |
+      SELECT 
+        c.CUSTOMER_NAME,
+        c.CUSTOMER_TYPE,
+        r.REGION_NAME,
+        b.BILLING_MONTH,
+        b.TOTAL_AMOUNT_SAR,
+        b.DUE_DATE,
+        DATEDIFF(day, b.DUE_DATE, CURRENT_DATE()) AS DAYS_OVERDUE
+      FROM SIO_DB.DATA.BILLING b
+      JOIN SIO_DB.DATA.CUSTOMERS c ON b.CUSTOMER_ID = c.CUSTOMER_ID
+      JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
+      WHERE b.BILL_STATUS = 'OVERDUE'
+      ORDER BY DAYS_OVERDUE DESC
+  
+  - name: water_resource_status
+    question: What is the water resource status across regions?
+    sql: |
+      SELECT 
+        r.REGION_NAME,
+        COUNT(ws.SOURCE_ID) AS TOTAL_SOURCES,
+        SUM(ws.CAPACITY_M3) AS TOTAL_CAPACITY_M3,
+        SUM(ws.CURRENT_LEVEL_M3) AS CURRENT_LEVEL_M3,
+        ROUND((SUM(ws.CURRENT_LEVEL_M3) / SUM(ws.CAPACITY_M3)) * 100, 1) AS CAPACITY_UTILIZATION_PERCENT,
+        CASE 
+          WHEN (SUM(ws.CURRENT_LEVEL_M3) / SUM(ws.CAPACITY_M3)) < 0.50 THEN 'Optimization Recommended'
+          WHEN (SUM(ws.CURRENT_LEVEL_M3) / SUM(ws.CAPACITY_M3)) < 0.70 THEN 'Moderate'
+          ELSE 'Excellent'
+        END AS RESOURCE_STATUS
+      FROM SIO_DB.DATA.REGIONS r
+      LEFT JOIN SIO_DB.DATA.WATER_SOURCES ws ON r.REGION_ID = ws.REGION_ID
+      WHERE ws.STATUS = 'ACTIVE'
+      GROUP BY r.REGION_NAME
+      ORDER BY CAPACITY_UTILIZATION_PERCENT ASC
+  
+  - name: regional_usage_summary
+    question: Show me water usage by region
+    sql: |
+      SELECT 
+        r.REGION_NAME,
+        COUNT(DISTINCT c.CUSTOMER_ID) AS TOTAL_CUSTOMERS,
+        SUM(wu.VOLUME_M3) AS TOTAL_USAGE_M3,
+        AVG(wu.VOLUME_M3) AS AVG_DAILY_USAGE_M3,
+        MAX(wu.READING_DATE) AS LAST_READING_DATE
+      FROM SIO_DB.DATA.WATER_USAGE wu
+      JOIN SIO_DB.DATA.WATER_METERS wm ON wu.METER_ID = wm.METER_ID
+      JOIN SIO_DB.DATA.CUSTOMERS c ON wm.CUSTOMER_ID = c.CUSTOMER_ID
+      JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
+      WHERE wu.READING_DATE >= DATEADD(month, -1, CURRENT_DATE())
+      GROUP BY r.REGION_NAME
+      ORDER BY TOTAL_USAGE_M3 DESC
+  
+  - name: pending_payments_summary
+    question: Show me outstanding balances by region
+    sql: |
+      SELECT 
+        r.REGION_NAME,
+        COUNT(DISTINCT b.CUSTOMER_ID) AS CUSTOMERS_WITH_OUTSTANDING,
+        COUNT(b.BILL_ID) AS OUTSTANDING_BILLS,
+        SUM(b.TOTAL_AMOUNT_SAR) AS TOTAL_OUTSTANDING_SAR
+      FROM SIO_DB.DATA.BILLING b
+      JOIN SIO_DB.DATA.CUSTOMERS c ON b.CUSTOMER_ID = c.CUSTOMER_ID
+      JOIN SIO_DB.DATA.REGIONS r ON c.REGION_ID = r.REGION_ID
+      WHERE b.BILL_STATUS IN ('PENDING', 'OVERDUE')
+      GROUP BY r.REGION_NAME
+      ORDER BY TOTAL_OUTSTANDING_SAR DESC
+  
+  - name: seasonal_trends
+    question: What are the seasonal water usage trends?
+    sql: |
+      SELECT 
+        DATE_TRUNC('MONTH', wu.READING_DATE) AS MONTH,
+        SUM(wu.VOLUME_M3) AS TOTAL_USAGE_M3,
+        AVG(wu.VOLUME_M3) AS AVG_DAILY_USAGE_M3,
+        COUNT(DISTINCT wu.METER_ID) AS ACTIVE_METERS
+      FROM SIO_DB.DATA.WATER_USAGE wu
+      WHERE wu.READING_DATE >= DATEADD(month, -12, CURRENT_DATE())
+      GROUP BY DATE_TRUNC('MONTH', wu.READING_DATE)
+      ORDER BY MONTH
+

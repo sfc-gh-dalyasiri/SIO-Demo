@@ -1,0 +1,453 @@
+# Database and Infrastructure Setup
+
+This guide covers setting up your Snowflake infrastructure programmatically.
+
+## Prerequisites
+
+```bash
+# Install Snowflake CLI
+pip install snowflake-cli-labs
+
+# Configure connection (one-time setup)
+snow connection add
+
+# Test connection
+snow connection test
+```
+
+## Method 1: Using Snowflake CLI (Recommended)
+
+### 1. Create Database Setup Script
+
+**File**: `data_engineering/setup_database.sql`
+
+```sql
+-- ============================================================================
+-- Database Setup Script
+-- ============================================================================
+
+USE ROLE ACCOUNTADMIN;
+
+-- Create database
+CREATE DATABASE IF NOT EXISTS MY_APP_DB;
+
+-- Create schemas
+CREATE SCHEMA IF NOT EXISTS MY_APP_DB.DATA;
+CREATE SCHEMA IF NOT EXISTS MY_APP_DB.OPERATIONS;
+CREATE SCHEMA IF NOT EXISTS MY_APP_DB.KNOWLEDGE_BASE;
+CREATE SCHEMA IF NOT EXISTS MY_APP_DB.SEMANTIC_MODELS;
+
+-- Create warehouse
+-- ⚠️ TIP: Use LARGE warehouse for demos to track consumption separately
+CREATE WAREHOUSE IF NOT EXISTS MY_APP_WH
+  WAREHOUSE_SIZE = MEDIUM
+  AUTO_SUSPEND = 300       -- Suspend after 5 minutes of inactivity
+  AUTO_RESUME = TRUE
+  INITIALLY_SUSPENDED = FALSE
+  COMMENT = 'Warehouse for application queries';
+
+-- Optional: Create separate warehouse for demos/testing
+CREATE WAREHOUSE IF NOT EXISTS MY_APP_DEMO_WH
+  WAREHOUSE_SIZE = LARGE   -- Easier to track consumption
+  AUTO_SUSPEND = 300
+  AUTO_RESUME = TRUE
+  COMMENT = 'Dedicated warehouse for demo - consumption tracking';
+
+USE WAREHOUSE MY_APP_WH;
+USE DATABASE MY_APP_DB;
+
+-- ============================================================================
+-- Create Tables
+-- ============================================================================
+
+USE SCHEMA DATA;
+
+-- Example: Customer table
+CREATE OR REPLACE TABLE CUSTOMERS (
+    CUSTOMER_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    FULL_NAME VARCHAR(100) NOT NULL,
+    EMAIL VARCHAR(100),
+    PHONE VARCHAR(20),
+    CREATED_DATE DATE DEFAULT CURRENT_DATE(),
+    LAST_UPDATED TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Example: Transactions table
+CREATE OR REPLACE TABLE TRANSACTIONS (
+    TRANSACTION_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+    CUSTOMER_ID NUMBER NOT NULL,
+    TRANSACTION_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+    AMOUNT NUMBER(15, 2) NOT NULL,
+    CURRENCY VARCHAR(3) DEFAULT 'USD',
+    STATUS VARCHAR(20) DEFAULT 'COMPLETED',
+    FOREIGN KEY (CUSTOMER_ID) REFERENCES CUSTOMERS(CUSTOMER_ID)
+);
+
+-- ============================================================================
+-- Create Stages (for semantic models, data files)
+-- ============================================================================
+
+USE SCHEMA SEMANTIC_MODELS;
+
+-- ⚠️ CRITICAL: Enable DIRECTORY for Snowsight UI visibility
+CREATE STAGE IF NOT EXISTS SEMANTIC_MODEL_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'Stage for semantic model YAML files';
+
+-- If stage already exists, enable directory:
+-- ALTER STAGE SEMANTIC_MODEL_STAGE SET DIRECTORY = (ENABLE = TRUE);
+
+-- ============================================================================
+-- Create Views (if needed)
+-- ============================================================================
+
+USE SCHEMA DATA;
+
+CREATE OR REPLACE VIEW CUSTOMER_SUMMARY AS
+SELECT
+    c.CUSTOMER_ID,
+    c.FULL_NAME,
+    c.EMAIL,
+    COUNT(t.TRANSACTION_ID) AS TOTAL_TRANSACTIONS,
+    SUM(t.AMOUNT) AS TOTAL_AMOUNT
+FROM CUSTOMERS c
+LEFT JOIN TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID
+GROUP BY c.CUSTOMER_ID, c.FULL_NAME, c.EMAIL;
+
+-- ============================================================================
+-- Grant Permissions
+-- ============================================================================
+
+GRANT USAGE ON DATABASE MY_APP_DB TO ROLE ACCOUNTADMIN;
+GRANT USAGE ON ALL SCHEMAS IN DATABASE MY_APP_DB TO ROLE ACCOUNTADMIN;
+GRANT ALL ON ALL TABLES IN SCHEMA MY_APP_DB.DATA TO ROLE ACCOUNTADMIN;
+GRANT ALL ON ALL STAGES IN SCHEMA MY_APP_DB.SEMANTIC_MODELS TO ROLE ACCOUNTADMIN;
+
+SELECT 'Database setup complete!' AS STATUS;
+```
+
+### 2. Execute Setup Script
+
+```bash
+# Run the setup script
+snow sql -f data_engineering/setup_database.sql
+
+# Verify database exists
+snow sql -q "SHOW DATABASES LIKE 'MY_APP_DB';"
+
+# Verify tables exist
+snow sql -q "SHOW TABLES IN SCHEMA MY_APP_DB.DATA;"
+
+# Verify warehouse exists
+snow sql -q "SHOW WAREHOUSES LIKE 'MY_APP_WH';"
+```
+
+## Method 2: Using Python with Snowflake Connector
+
+**File**: `data_engineering/setup_via_python.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Setup Snowflake database infrastructure programmatically
+"""
+
+import snowflake.connector
+import os
+from dotenv import load_dotenv
+
+# Load credentials
+load_dotenv()
+
+def create_connection():
+    """Create Snowflake connection"""
+    return snowflake.connector.connect(
+        account=os.getenv('SNOWFLAKE_ACCOUNT'),
+        user=os.getenv('SNOWFLAKE_USER'),
+        password=os.getenv('SNOWFLAKE_PASSWORD'),
+        role='ACCOUNTADMIN'
+    )
+
+def execute_sql(conn, sql):
+    """Execute SQL statement"""
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql)
+        results = cursor.fetchall()
+        return results
+    finally:
+        cursor.close()
+
+def setup_database(conn):
+    """Create database and schemas"""
+    
+    # Create database
+    execute_sql(conn, "CREATE DATABASE IF NOT EXISTS MY_APP_DB")
+    
+    # Create schemas
+    schemas = ['DATA', 'OPERATIONS', 'KNOWLEDGE_BASE', 'SEMANTIC_MODELS']
+    for schema in schemas:
+        execute_sql(conn, f"CREATE SCHEMA IF NOT EXISTS MY_APP_DB.{schema}")
+        print(f"✅ Created schema: {schema}")
+    
+    # Create warehouse
+    execute_sql(conn, """
+        CREATE WAREHOUSE IF NOT EXISTS MY_APP_WH
+        WITH WAREHOUSE_SIZE = 'MEDIUM'
+        AUTO_SUSPEND = 300
+        AUTO_RESUME = TRUE
+    """)
+    print("✅ Created warehouse: MY_APP_WH")
+
+def create_tables(conn):
+    """Create application tables"""
+    
+    execute_sql(conn, "USE DATABASE MY_APP_DB")
+    execute_sql(conn, "USE SCHEMA DATA")
+    execute_sql(conn, "USE WAREHOUSE MY_APP_WH")
+    
+    # Customers table
+    execute_sql(conn, """
+        CREATE OR REPLACE TABLE CUSTOMERS (
+            CUSTOMER_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+            FULL_NAME VARCHAR(100) NOT NULL,
+            EMAIL VARCHAR(100),
+            PHONE VARCHAR(20),
+            CREATED_DATE DATE DEFAULT CURRENT_DATE()
+        )
+    """)
+    print("✅ Created table: CUSTOMERS")
+    
+    # Transactions table
+    execute_sql(conn, """
+        CREATE OR REPLACE TABLE TRANSACTIONS (
+            TRANSACTION_ID NUMBER AUTOINCREMENT PRIMARY KEY,
+            CUSTOMER_ID NUMBER NOT NULL,
+            TRANSACTION_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+            AMOUNT NUMBER(15, 2) NOT NULL,
+            STATUS VARCHAR(20) DEFAULT 'COMPLETED',
+            FOREIGN KEY (CUSTOMER_ID) REFERENCES CUSTOMERS(CUSTOMER_ID)
+        )
+    """)
+    print("✅ Created table: TRANSACTIONS")
+
+def main():
+    print("Setting up Snowflake database...")
+    
+    conn = create_connection()
+    try:
+        setup_database(conn)
+        create_tables(conn)
+        print("\n✅ Database setup complete!")
+    finally:
+        conn.close()
+
+if __name__ == "__main__":
+    main()
+```
+
+**Run**:
+```bash
+python data_engineering/setup_via_python.py
+```
+
+## Warehouse Sizing Guide
+
+| Size | Credits/Hour | Use Case |
+|------|--------------|----------|
+| X-SMALL | 1 | Development, testing, small queries |
+| SMALL | 2 | Light production workloads |
+| MEDIUM | 4 | Standard production (recommended start) |
+| LARGE | 8 | Heavy analytical queries |
+| X-LARGE | 16 | Very large datasets |
+
+**Best Practice**: Start with MEDIUM, monitor performance, adjust as needed.
+
+## Loading Data
+
+### Method 1: Direct INSERT (Small datasets)
+
+```sql
+-- Insert sample data
+INSERT INTO MY_APP_DB.DATA.CUSTOMERS (FULL_NAME, EMAIL, PHONE)
+VALUES
+    ('John Doe', 'john@example.com', '+1234567890'),
+    ('Jane Smith', 'jane@example.com', '+1234567891');
+```
+
+### Method 2: Generate Synthetic Data (Python)
+
+**File**: `data_engineering/generate_data.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Generate synthetic data for testing
+"""
+
+import pandas as pd
+import random
+from datetime import datetime, timedelta
+
+def generate_customers(n=100):
+    """Generate n customers"""
+    customers = []
+    for i in range(1, n+1):
+        customers.append({
+            'FULL_NAME': f'Customer {i}',
+            'EMAIL': f'customer{i}@example.com',
+            'PHONE': f'+{random.randint(1000000000, 9999999999)}'
+        })
+    return pd.DataFrame(customers)
+
+def generate_transactions(customers_df, n=1000):
+    """Generate n transactions"""
+    transactions = []
+    start_date = datetime.now() - timedelta(days=365)
+    
+    for i in range(n):
+        transactions.append({
+            'CUSTOMER_ID': random.choice(customers_df.index) + 1,
+            'TRANSACTION_DATE': start_date + timedelta(days=random.randint(0, 365)),
+            'AMOUNT': round(random.uniform(10, 1000), 2),
+            'CURRENCY': random.choice(['USD', 'EUR', 'GBP']),
+            'STATUS': random.choice(['COMPLETED', 'PENDING'])
+        })
+    return pd.DataFrame(transactions)
+
+def main():
+    # Generate data
+    customers = generate_customers(100)
+    transactions = generate_transactions(customers, 1000)
+    
+    # Save to CSV
+    customers.to_csv('data/customers.csv', index=False)
+    transactions.to_csv('data/transactions.csv', index=False)
+    
+    print(f"✅ Generated {len(customers)} customers")
+    print(f"✅ Generated {len(transactions)} transactions")
+
+if __name__ == "__main__":
+    main()
+```
+
+### Method 3: Load CSV Files
+
+**File**: `data_engineering/load_data.sql`
+
+```sql
+USE DATABASE MY_APP_DB;
+USE SCHEMA DATA;
+USE WAREHOUSE MY_APP_WH;
+
+-- Create stage for data files
+CREATE STAGE IF NOT EXISTS DATA_STAGE;
+
+-- Upload CSV files (run from terminal first)
+-- PUT file:///path/to/customers.csv @DATA_STAGE AUTO_COMPRESS=FALSE;
+-- PUT file:///path/to/transactions.csv @DATA_STAGE AUTO_COMPRESS=FALSE;
+
+-- Load customers
+COPY INTO CUSTOMERS (FULL_NAME, EMAIL, PHONE)
+FROM @DATA_STAGE/customers.csv
+FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);
+
+-- Load transactions
+COPY INTO TRANSACTIONS (CUSTOMER_ID, TRANSACTION_DATE, AMOUNT, CURRENCY, STATUS)
+FROM @DATA_STAGE/transactions.csv
+FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);
+
+-- Verify data loaded
+SELECT 'Customers loaded:', COUNT(*) FROM CUSTOMERS;
+SELECT 'Transactions loaded:', COUNT(*) FROM TRANSACTIONS;
+```
+
+**Execute**:
+```bash
+# Upload files
+snow sql -q "PUT file://data/customers.csv @MY_APP_DB.DATA.DATA_STAGE AUTO_COMPRESS=FALSE;"
+snow sql -q "PUT file://data/transactions.csv @MY_APP_DB.DATA.DATA_STAGE AUTO_COMPRESS=FALSE;"
+
+# Run load script
+snow sql -f data_engineering/load_data.sql
+```
+
+## Environment Configuration
+
+**File**: `.env`
+
+```bash
+# Snowflake Connection
+SNOWFLAKE_ACCOUNT=your-account.snowflakecomputing.com
+SNOWFLAKE_USER=your_username
+SNOWFLAKE_PASSWORD=your_password
+
+# Or use PAT for API access
+SNOWFLAKE_PAT=your_personal_access_token
+
+# Database Configuration
+DATABASE=MY_APP_DB
+WAREHOUSE=MY_APP_WH
+SCHEMA=DATA
+```
+
+## Verification Checklist
+
+After setup, verify everything works:
+
+```bash
+# 1. Database exists
+snow sql -q "SHOW DATABASES LIKE 'MY_APP_DB';"
+
+# 2. Schemas exist
+snow sql -q "SHOW SCHEMAS IN DATABASE MY_APP_DB;"
+
+# 3. Warehouse exists and is active
+snow sql -q "SHOW WAREHOUSES LIKE 'MY_APP_WH';"
+
+# 4. Tables have data
+snow sql -q "SELECT COUNT(*) FROM MY_APP_DB.DATA.CUSTOMERS;"
+snow sql -q "SELECT COUNT(*) FROM MY_APP_DB.DATA.TRANSACTIONS;"
+
+# 5. Stage exists
+snow sql -q "SHOW STAGES IN SCHEMA MY_APP_DB.SEMANTIC_MODELS;"
+```
+
+## Common Issues
+
+### Issue: Permission Denied
+
+**Solution**: Use ACCOUNTADMIN role or grant proper permissions
+
+```sql
+USE ROLE ACCOUNTADMIN;
+GRANT USAGE ON DATABASE MY_APP_DB TO ROLE MY_ROLE;
+GRANT CREATE SCHEMA ON DATABASE MY_APP_DB TO ROLE MY_ROLE;
+```
+
+### Issue: Warehouse Not Starting
+
+**Solution**: Check warehouse status and resume manually
+
+```sql
+SHOW WAREHOUSES;
+ALTER WAREHOUSE MY_APP_WH RESUME;
+```
+
+### Issue: Cannot Upload to Stage
+
+**Solution**: Verify stage exists and you have write permissions
+
+```sql
+SHOW STAGES IN SCHEMA MY_APP_DB.SEMANTIC_MODELS;
+GRANT READ, WRITE ON STAGE MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE TO ROLE ACCOUNTADMIN;
+```
+
+## Next Steps
+
+Once database setup is complete:
+1. Create semantic models (see `03-semantic-models.md`)
+2. Set up Cortex Search if needed (see `05-cortex-search.md`)
+3. Create custom tools (see `06-custom-tools.md`)
+4. Create the Cortex Agent (see `04-cortex-agents.md`)
+

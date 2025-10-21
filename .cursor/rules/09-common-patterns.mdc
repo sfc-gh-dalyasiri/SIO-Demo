@@ -1,0 +1,589 @@
+# Common Patterns and Best Practices
+
+Lessons learned and proven patterns from real-world Snowflake Cortex AI implementations.
+
+## Critical Implementation Gotchas
+
+### 1. Cortex Analyst MUST Have execution_environment
+
+**❌ WRONG**:
+```json
+{
+  "tool_resources": {
+    "analyst_tool": {
+      "semantic_model_file": "@DB.SCHEMA.STAGE/model.yaml"
+    }
+  }
+}
+```
+
+**✅ CORRECT**:
+```json
+{
+  "tool_resources": {
+    "analyst_tool": {
+      "semantic_model_file": "@DB.SCHEMA.STAGE/model.yaml",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE"
+      }
+    }
+  }
+}
+```
+
+### 2. Cortex Search Field Name
+
+**❌ WRONG**:
+```json
+{
+  "tool_resources": {
+    "search_tool": {
+      "cortex_search_service": "DB.SCHEMA.SERVICE"
+    }
+  }
+}
+```
+
+**✅ CORRECT**:
+```json
+{
+  "tool_resources": {
+    "search_tool": {
+      "search_service": "DB.SCHEMA.SERVICE",
+      "max_results": 5,
+      "id_column": "DOCUMENT_ID",
+      "title_column": "TITLE"
+    }
+  }
+}
+```
+
+### 3. Custom Function Parameter Names
+
+**❌ WRONG**:
+```json
+{
+  "input_schema": {
+    "properties": {
+      "amount": {"type": "number"}  // lowercase
+    }
+  }
+}
+```
+
+**✅ CORRECT**:
+```json
+{
+  "input_schema": {
+    "properties": {
+      "AMOUNT": {"type": "number"}  // UPPERCASE
+    }
+  }
+}
+```
+
+### 4. Tool Type vs Resource Type
+
+**❌ WRONG**:
+```json
+{
+  "tools": [{
+    "tool_spec": {"type": "function"}  // Wrong type
+  }],
+  "tool_resources": {
+    "tool_name": {"type": "function"}
+  }
+}
+```
+
+**✅ CORRECT**:
+```json
+{
+  "tools": [{
+    "tool_spec": {"type": "generic"}  // Use 'generic'
+  }],
+  "tool_resources": {
+    "tool_name": {
+      "type": "function",  // Then specify function/procedure here
+      "identifier": "DB.SCHEMA.FUNCTION_NAME"
+    }
+  }
+}
+```
+
+## Agent Instruction Patterns
+
+### Pattern: User Type Detection
+
+For dual-purpose agents (retail customers + business users):
+
+```json
+{
+  "orchestration": "**User Type Detection**:\n- Personal pronouns (my, I, me) → Retail customer → Filter by customer_id\n- Aggregate terms (all, total, everyone) → Business user → No filter\n\n**Query Routing**:\n- 'my balance' → WHERE customer_id = {demo_customer_id}\n- 'total transaction volume' → No filter, return aggregate"
+}
+```
+
+### Pattern: Tool Selection Logic
+
+Clear hierarchy for tool selection:
+
+```json
+{
+  "orchestration": "**Tool Selection Priority**:\n1. Numeric/data questions → data_analyst\n2. General information/FAQs → knowledge_search\n3. Actions (transfer, update) → custom functions\n\n**Multi-Tool Queries**:\n- Search knowledge base first for context\n- Then query data for specifics\n- Combine results in response"
+}
+```
+
+### Pattern: Confirmation for Actions
+
+Always confirm before executing modifications:
+
+```json
+{
+  "orchestration": "For money transfers:\n1. Extract amount, from_account, to_account\n2. ALWAYS ask user to confirm details\n3. Only after explicit 'yes' or 'confirm', call transfer_money\n4. Report result clearly with new balance"
+}
+```
+
+## Semantic Model Patterns
+
+### Pattern: Verified Queries for Demo Filtering
+
+For demos with specific customer filtering:
+
+```yaml
+verified_queries:
+  - name: demo_customer_balance
+    question: What is my account balance?
+    sql: |
+      SELECT 
+        FULL_NAME,
+        BALANCE_AED
+      FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+      WHERE CUSTOMER_ID = 1  -- Demo customer hardcoded
+  
+  - name: all_customer_metrics
+    question: What is the total transaction volume?
+    sql: |
+      SELECT 
+        COUNT(*) AS TOTAL_TRANSACTIONS,
+        SUM(AMOUNT) AS TOTAL_VOLUME
+      FROM MY_APP_DB.DATA.TRANSACTIONS
+      -- No customer filter - returns all
+```
+
+### Pattern: Comprehensive Synonyms
+
+Include all variations users might use:
+
+```yaml
+dimensions:
+  - name: customer_id
+    synonyms:
+      - customer
+      - client
+      - account holder
+      - user
+      - customer number
+      - client id
+      - account id
+    expr: CUSTOMER_ID
+    data_type: NUMBER
+```
+
+### Pattern: Time-Based Queries
+
+Handle "current month", "today", etc.:
+
+```yaml
+verified_queries:
+  - name: current_month_transactions
+    question: Show me transactions this month
+    sql: |
+      SELECT *
+      FROM MY_APP_DB.DATA.TRANSACTIONS
+      WHERE MONTH(TRANSACTION_DATE) = MONTH(CURRENT_DATE())
+        AND YEAR(TRANSACTION_DATE) = YEAR(CURRENT_DATE())
+      ORDER BY TRANSACTION_DATE DESC
+```
+
+## Custom Function Patterns
+
+### Pattern: Comprehensive Error Handling
+
+```python
+def robust_transfer(session, amount, from_account, to_account):
+    """Transfer with complete error handling"""
+    
+    # 1. Input validation
+    if amount <= 0:
+        return json.dumps({
+            "status": "error",
+            "code": "INVALID_AMOUNT",
+            "message": "Amount must be positive"
+        })
+    
+    try:
+        # 2. Check source account
+        result = session.sql(f"""
+            SELECT BALANCE_AED, ACCOUNT_STATUS
+            FROM ACCOUNTS
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        if not result:
+            return json.dumps({
+                "status": "error",
+                "code": "ACCOUNT_NOT_FOUND",
+                "message": f"Account {from_account} not found"
+            })
+        
+        balance = float(result[0][0])
+        status = result[0][1]
+        
+        # 3. Validate account status
+        if status != 'ACTIVE':
+            return json.dumps({
+                "status": "error",
+                "code": "ACCOUNT_INACTIVE",
+                "message": f"Account {from_account} is {status}"
+            })
+        
+        # 4. Check sufficient funds
+        if balance < amount:
+            return json.dumps({
+                "status": "error",
+                "code": "INSUFFICIENT_FUNDS",
+                "message": f"Balance ({balance}) is less than amount ({amount})"
+            })
+        
+        # 5. Execute transfer
+        # ... transfer logic ...
+        
+        # 6. Success response
+        return json.dumps({
+            "status": "success",
+            "amount": amount,
+            "new_balance": new_balance,
+            "transaction_id": txn_id
+        })
+        
+    except Exception as e:
+        # 7. Unexpected error
+        return json.dumps({
+            "status": "error",
+            "code": "INTERNAL_ERROR",
+            "message": f"Transfer failed: {str(e)}"
+        })
+```
+
+### Pattern: Returning Structured JSON
+
+Always return structured data for parsing:
+
+```python
+def get_account_summary(session, account_number):
+    """Return structured account summary"""
+    
+    # ... get data ...
+    
+    return json.dumps({
+        "account": {
+            "number": account_number,
+            "name": name,
+            "balance": balance,
+            "currency": currency,
+            "status": status
+        },
+        "recent_transactions": [
+            {
+                "date": str(txn_date),
+                "type": txn_type,
+                "amount": txn_amount,
+                "description": txn_desc
+            }
+            for txn in transactions
+        ],
+        "summary": {
+            "total_transactions": count,
+            "last_activity": str(last_date)
+        }
+    })
+```
+
+## API Integration Patterns
+
+### Pattern: Streaming with Status Updates
+
+For real-time user feedback:
+
+```python
+def chat_with_status(message, on_status, on_content):
+    """Stream response with status callbacks"""
+    
+    payload = {"messages": [...], "stream": True}
+    
+    response = requests.post(endpoint, headers=headers, json=payload, stream=True)
+    
+    for line in response.iter_lines():
+        if not line:
+            continue
+        
+        line = line.decode('utf-8')
+        
+        if line.startswith('data: '):
+            data = json.loads(line[6:])
+            event = data.get('event')
+            
+            if event == 'response.status':
+                # Agent is working
+                on_status(data.get('message'))
+            
+            elif event == 'response.content.delta':
+                # Content chunk
+                text = data['delta']['text']
+                on_content(text)
+            
+            elif event == 'response.done':
+                # Complete
+                break
+```
+
+### Pattern: Conversation History Management
+
+```python
+class ConversationManager:
+    def __init__(self, client, max_history=10):
+        self.client = client
+        self.history = []
+        self.max_history = max_history
+    
+    def send(self, message):
+        """Send message with managed history"""
+        
+        # Add user message
+        self.history.append({
+            "role": "user",
+            "content": [{"type": "text", "text": message}]
+        })
+        
+        # Keep only recent history
+        if len(self.history) > self.max_history * 2:
+            self.history = self.history[-(self.max_history * 2):]
+        
+        # Send with history
+        response = self.client.chat(message, self.history)
+        
+        # Add assistant response
+        self.history.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": response['text']}]
+        })
+        
+        return response['text']
+```
+
+## Testing Patterns
+
+### Pattern: Layered Testing
+
+```python
+def test_full_flow():
+    """Test complete user flow"""
+    
+    # 1. Infrastructure
+    assert database_exists('MY_APP_DB')
+    assert table_has_data('CUSTOMERS')
+    
+    # 2. Component
+    assert semantic_model_works()
+    assert search_returns_results()
+    
+    # 3. Integration
+    assert agent_responds("What is my balance?")
+    
+    # 4. Multi-turn
+    conversation = [
+        "What is my balance?",
+        "And my recent transactions?",
+        "Explain the last one"
+    ]
+    assert conversation_works(conversation)
+```
+
+### Pattern: Test Data Management
+
+```python
+@pytest.fixture
+def test_customer():
+    """Create test customer"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Create test data
+    cursor.execute("""
+        INSERT INTO CUSTOMERS (CUSTOMER_ID, FULL_NAME, ACCOUNT_NUMBER, BALANCE_AED)
+        VALUES (99999, 'Test Customer', 'TEST001', 1000.00)
+    """)
+    
+    yield 99999  # Test runs
+    
+    # Cleanup
+    cursor.execute("DELETE FROM CUSTOMERS WHERE CUSTOMER_ID = 99999")
+    conn.close()
+```
+
+## Production Readiness Checklist
+
+### Security
+
+- [ ] Use PAT, not username/password
+- [ ] Rotate PAT regularly (set expiration reminders)
+- [ ] Never log PAT or sensitive data
+- [ ] Implement row-level security in Snowflake
+- [ ] Validate all user inputs
+- [ ] Use HTTPS for all API calls
+
+### Performance
+
+- [ ] Rightsize warehouses (don't use X-LARGE for everything)
+- [ ] Set auto-suspend on warehouses (5-10 minutes)
+- [ ] Use appropriate timeouts (30-60s)
+- [ ] Cache frequent queries
+- [ ] Monitor query performance
+- [ ] Optimize semantic models (verified queries for common cases)
+
+### Reliability
+
+- [ ] Implement retry logic with exponential backoff
+- [ ] Handle rate limits gracefully
+- [ ] Log all errors with context
+- [ ] Set up monitoring and alerting
+- [ ] Test failure scenarios
+- [ ] Have rollback plan
+
+### Cost Optimization
+
+- [ ] Monitor Cortex AI credit usage
+- [ ] Use streaming for long operations (avoid timeouts/retries)
+- [ ] Cache search results
+- [ ] Use verified queries to avoid unnecessary Analyst calls
+- [ ] Auto-suspend warehouses when not in use
+- [ ] Review and optimize expensive queries
+
+## Debugging Patterns
+
+### Pattern: Enable Debug Mode
+
+```python
+DEBUG = True
+
+if DEBUG:
+    print(f"Request: {json.dumps(payload, indent=2)}")
+    print(f"Response: {response.status_code}")
+    print(f"Body: {response.text[:500]}")
+```
+
+### Pattern: SSE Event Inspection
+
+```python
+def inspect_sse_stream(response):
+    """Debug SSE events"""
+    for line in response.iter_lines():
+        if not line:
+            continue
+        
+        line = line.decode('utf-8')
+        print(f"RAW: {line}")
+        
+        if line.startswith('data: '):
+            try:
+                data = json.loads(line[6:])
+                print(f"EVENT: {data.get('event')}")
+                print(f"DATA: {json.dumps(data, indent=2)}")
+            except:
+                print(f"NON-JSON: {line}")
+```
+
+## Documentation Standards
+
+### Pattern: Inline Documentation
+
+```sql
+CREATE OR REPLACE FUNCTION TRANSFER_MONEY(...)
+RETURNS STRING
+COMMENT = 'Execute money transfer between accounts. Validates balance, updates accounts, records transaction. Returns JSON with status, new balance, and transaction ID.'
+...
+```
+
+### Pattern: README Template
+
+Every project should have:
+
+```markdown
+# Project Name
+
+## Quick Start
+- Prerequisites
+- Setup commands
+- Test commands
+
+## Architecture
+- Component diagram
+- Data flow
+
+## Configuration
+- Environment variables
+- Warehouse sizing
+
+## Testing
+- Test commands
+- Expected results
+
+## Deployment
+- Production checklist
+- Rollback procedure
+
+## Troubleshooting
+- Common issues
+- Debug steps
+```
+
+## Key Learnings Summary
+
+1. **Always test infrastructure first** - Database, schemas, data, functions
+2. **Use SQL for agent creation** - More reliable than REST API for complex specs
+3. **Verified queries are powerful** - Faster, more reliable for common cases
+4. **Clear instructions matter** - Agent performance depends on good orchestration logic
+5. **Error handling is critical** - Return structured errors from custom functions
+6. **Streaming improves UX** - Real-time status updates keep users informed
+7. **Test edge cases** - Invalid inputs, empty results, timeouts
+8. **Monitor costs** - Cortex AI and warehouse credits add up
+9. **Document everything** - Future you will thank present you
+10. **Iterate based on real usage** - First version won't be perfect
+
+## Resources
+
+### Official Documentation
+- [Snowflake Cortex Agents](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-agents)
+- [Cortex Analyst](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-analyst)
+- [Cortex Search](https://docs.snowflake.com/en/user-guide/snowflake-cortex/cortex-search)
+- [Python UDFs](https://docs.snowflake.com/en/developer-guide/udf/python/udf-python)
+
+### Quickstarts
+- [Getting Started with Cortex Agents](https://quickstarts.snowflake.com/guide/getting_started_with_cortex_agents)
+
+### Tools
+- [Snowflake CLI](https://docs.snowflake.com/en/developer-guide/snowflake-cli-v2/index)
+- [Snowpark Python](https://docs.snowflake.com/en/developer-guide/snowpark/python/index)
+
+## Next Steps
+
+Now that you have all the patterns:
+1. Start with database setup
+2. Create semantic models incrementally
+3. Test each component independently
+4. Build agent step by step
+5. Iterate based on testing
+6. Deploy to production with monitoring
+
+Good luck with your Snowflake Cortex AI project! 🚀

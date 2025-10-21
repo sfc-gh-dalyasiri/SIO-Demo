@@ -1,0 +1,52 @@
+---
+description: Local development environment and Cursor IDE setup
+globs: ["**/venv/**", "**/requirements.txt", "**/.cursor/**"]
+alwaysApply: false
+---
+
+# Local Development Setup Rules
+
+## Virtual Environment
+- Use Python virtual environment: `python3 -m venv venv`
+- Activate: `source venv/bin/activate`
+- Install dependencies: `pip install -r requirements.txt`
+- Install optional dev dependencies: `pip install plotly`
+
+## Cursor IDE Configuration
+- Set Python interpreter to: `./venv/bin/python`
+- Use Cmd+Shift+P -> "Python: Select Interpreter"
+- Ensures proper import resolution and IntelliSense
+- Fixes squiggly yellow lines under imports
+
+### Configuration
+- **`config.toml`** - Snowflake connection credentials and settings (local only, never commit)
+
+## Local Development
+For local development and testing:
+- Use `config.toml` for Streamlit app credentials
+- Run Streamlit locally before deploying: `streamlit run streamlit_app.py`
+- Test with and without optional dependencies
+- Verify all imports resolve correctly
+- Test multi-file imports work properly
+
+## Local Snowflake Connection
+- Configuration file: `setup/config.toml` (excluded from Git)
+- **Connection Priority**: config.toml FIRST (local), then st.connection() (hosted)
+- **PAT Authentication**: Personal Access Tokens go in `password` field
+- PAT tokens start with "eyJ" and are passed as `password` parameter directly
+- **IMPORTANT**: Do NOT use `authenticator='oauth'` for PAT tokens
+- The app auto-detects JWT tokens and handles authentication correctly
+
+## Code Organization Principles
+- Put all streamlit code in streamlit folder, gitignore what is not needed to be pushed i.e. local folder for local development
+- Separate concerns: data loading, visualization, UI logic
+- Use utility modules for reusable functions
+- Import patterns: specific functions, not entire modules when possible
+- Add docstrings to utility functions
+- Use comments to explain complex logic
+
+## Performance Considerations
+- Import only needed functions from large libraries
+- Use lazy loading for optional features
+- Minimize Streamlit rerun cycles with proper state management
+- Use Streamlit's caching decorators for repeated operations

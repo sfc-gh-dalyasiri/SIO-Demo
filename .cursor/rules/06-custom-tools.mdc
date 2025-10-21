@@ -1,0 +1,1298 @@
+---
+alwaysApply: false
+---
+
+# Custom Tools (Python UDFs and Stored Procedures)
+
+Custom tools allow your Cortex Agent to execute business logic beyond querying and searching - like transfers, updates, calculations, and integrations.
+
+## Types of Custom Tools
+
+1. **Python UDFs (User-Defined Functions)** - Return values, pure functions
+2. **Stored Procedures** - Execute actions, modify data
+3. **External Functions** - Call external APIs (advanced)
+
+## When to Use Custom Tools
+
+Use custom tools when you need to:
+- Execute transactions (transfers, updates)
+- Perform complex calculations
+- Validate business rules
+- Integrate with external systems
+- Modify database state
+
+## Creating Python UDFs
+
+### Simple Function Example
+
+**File**: `cortex/create_custom_tools.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE MY_APP_DB;
+USE SCHEMA OPERATIONS;
+USE WAREHOUSE MY_WAREHOUSE;
+
+-- Example: Calculate transfer fee
+CREATE OR REPLACE FUNCTION CALCULATE_FEE(
+    AMOUNT FLOAT,
+    CURRENCY STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'calculate_fee'
+AS
+$$
+def calculate_fee(amount, currency):
+    """Calculate transfer fee based on amount and currency"""
+    
+    # Business logic
+    if currency == 'USD':
+        fee = amount * 0.01  # 1% for USD
+    elif currency == 'EUR':
+        fee = amount * 0.015  # 1.5% for EUR
+    else:
+        fee = amount * 0.02  # 2% for others
+    
+    # Minimum fee
+    fee = max(fee, 5.0)
+    
+    return f"Transfer fee: {fee:.2f} {currency}"
+$$;
+
+-- Test the function
+SELECT CALCULATE_FEE(1000, 'USD');
+SELECT CALCULATE_FEE(100, 'EUR');
+```
+
+## Creating Stored Procedures
+
+Stored procedures can modify data and execute transactions.
+
+### Transfer Money Example
+
+```sql
+CREATE OR REPLACE PROCEDURE TRANSFER_MONEY(
+    AMOUNT FLOAT,
+    FROM_ACCOUNT STRING,
+    TO_ACCOUNT STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'transfer_money'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def transfer_money(session: snowpark.Session, amount: float, from_account: str, to_account: str):
+    """Execute money transfer between accounts"""
+    
+    # Validate inputs
+    if amount <= 0:
+        return '{"status": "error", "message": "Amount must be positive"}'
+    
+    try:
+        # Check source account exists and has sufficient balance
+        result = session.sql(f"""
+            SELECT BALANCE_AED 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        if not result:
+            return '{"status": "error", "message": "Source account not found"}'
+        
+        balance = float(result[0][0])
+        
+        if balance < amount:
+            return '{"status": "error", "message": "Insufficient funds"}'
+        
+        # Check destination account exists
+        result = session.sql(f"""
+            SELECT ACCOUNT_NUMBER 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{to_account}'
+        """).collect()
+        
+        if not result:
+            return '{"status": "error", "message": "Destination account not found"}'
+        
+        # Calculate fee (1%)
+        fee = amount * 0.01
+        total_deduction = amount + fee
+        
+        # Deduct from source account
+        session.sql(f"""
+            UPDATE MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            SET BALANCE_AED = BALANCE_AED - {total_deduction},
+                LAST_UPDATED = CURRENT_TIMESTAMP()
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        # Add to destination account
+        session.sql(f"""
+            UPDATE MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            SET BALANCE_AED = BALANCE_AED + {amount},
+                LAST_UPDATED = CURRENT_TIMESTAMP()
+            WHERE ACCOUNT_NUMBER = '{to_account}'
+        """).collect()
+        
+        # Record transaction
+        session.sql(f"""
+            INSERT INTO MY_APP_DB.DATA.TRANSACTIONS 
+                (CUSTOMER_ID, TRANSACTION_TYPE, AMOUNT, CURRENCY, 
+                 FROM_ACCOUNT, TO_ACCOUNT, FEE_AED, STATUS)
+            SELECT 
+                CUSTOMER_ID,
+                'TRANSFER',
+                {amount},
+                'AED',
+                '{from_account}',
+                '{to_account}',
+                {fee},
+                'COMPLETED'
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        # Get new balance
+        result = session.sql(f"""
+            SELECT BALANCE_AED 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        new_balance = float(result[0][0])
+        
+        return f'{{"status": "success", "message": "Transfer completed", "amount": {amount}, "fee": {fee}, "new_balance": {new_balance}}}'
+        
+    except Exception as e:
+        return f'{{"status": "error", "message": "Transfer failed: {str(e)}"}}'
+$$;
+
+-- Test the procedure
+CALL TRANSFER_MONEY(100, 'ACC001', 'ACC002');
+```
+
+### Currency Exchange Example
+
+```sql
+CREATE OR REPLACE PROCEDURE EXCHANGE_CURRENCY(
+    AMOUNT FLOAT,
+    FROM_CURRENCY STRING,
+    TO_CURRENCY STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'exchange_currency'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def exchange_currency(session: snowpark.Session, amount: float, from_currency: str, to_currency: str):
+    """Exchange currency"""
+    
+    if amount <= 0:
+        return '{"status": "error", "message": "Amount must be positive"}'
+    
+    try:
+        # Get exchange rate
+        result = session.sql(f"""
+            SELECT BUY_RATE, SELL_RATE
+            FROM MY_APP_DB.OPERATIONS.EXCHANGE_RATES
+            WHERE CURRENCY_FROM = '{from_currency}'
+              AND CURRENCY_TO = '{to_currency}'
+            ORDER BY RATE_DATE DESC
+            LIMIT 1
+        """).collect()
+        
+        if not result:
+            return f'{{"status": "error", "message": "Exchange rate not available for {from_currency} to {to_currency}"}}'
+        
+        buy_rate = float(result[0][0])
+        sell_rate = float(result[0][1])
+        
+        # Use sell rate (bank sells to customer)
+        converted_amount = amount * sell_rate
+        
+        # Calculate fee (0.5%)
+        fee = amount * 0.005
+        
+        return f'{{"status": "success", "from_amount": {amount}, "from_currency": "{from_currency}", "to_amount": {converted_amount:.2f}, "to_currency": "{to_currency}", "rate": {sell_rate}, "fee": {fee}}}'
+        
+    except Exception as e:
+        return f'{{"status": "error", "message": "Exchange failed: {str(e)}"}}'
+$$;
+
+-- Test
+CALL EXCHANGE_CURRENCY(1000, 'AED', 'USD');
+```
+
+## Adding Custom Tools to Agent
+
+### 1. Define Tool in Agent Specification
+
+```sql
+CREATE OR REPLACE AGENT MY_APP_AGENT
+FROM SPECIFICATION $$
+{
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "transfer_money",
+        "description": "Execute money transfer between accounts. Always ask for user confirmation before executing.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "AMOUNT": {
+              "description": "Amount to transfer (positive number)",
+              "type": "number"
+            },
+            "FROM_ACCOUNT": {
+              "description": "Source account number",
+              "type": "string"
+            },
+            "TO_ACCOUNT": {
+              "description": "Destination account number",
+              "type": "string"
+            }
+          },
+          "required": ["AMOUNT", "FROM_ACCOUNT", "TO_ACCOUNT"]
+        }
+      }
+    }
+  ],
+  "tool_resources": {
+    "transfer_money": {
+      "type": "procedure",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE",
+        "query_timeout": 30
+      },
+      "identifier": "MY_APP_DB.OPERATIONS.TRANSFER_MONEY"
+    }
+  }
+}
+$$;
+```
+
+**⚠️ Critical**:
+- Parameter names in `input_schema` MUST be UPPERCASE
+- `identifier` must be fully qualified: `DATABASE.SCHEMA.FUNCTION_NAME`
+- Use `"type": "procedure"` for procedures, `"type": "function"` for UDFs
+
+### 2. Update Agent Instructions
+
+Tell the agent when and how to use the tool:
+
+```json
+{
+  "orchestration": "For money transfers:\n1. Extract amount, from_account, to_account from user request\n2. Confirm details with user\n3. Only after explicit confirmation, call transfer_money\n4. Report success/failure clearly"
+}
+```
+
+## Testing Custom Tools
+
+### Test Function Directly
+
+```sql
+-- Test UDF
+SELECT CALCULATE_FEE(500, 'USD');
+
+-- Test Procedure
+CALL TRANSFER_MONEY(100, 'ACC001', 'ACC002');
+
+-- Verify results
+SELECT * FROM MY_APP_DB.DATA.TRANSACTIONS 
+ORDER BY TRANSACTION_DATE DESC 
+LIMIT 5;
+```
+
+### Test via Agent
+
+```python
+# test_custom_tools.py
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+url = f"https://{os.getenv('SNOWFLAKE_HOST')}/api/v2/databases/SNOWFLAKE_INTELLIGENCE/schemas/AGENTIC/agents/MY_APP_AGENT:run"
+
+headers = {
+    "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "messages": [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Transfer 100 AED from ACC001 to ACC002"}]
+        }
+    ]
+}
+
+response = requests.post(url, headers=headers, json=payload)
+print(response.json())
+```
+
+## Advanced Patterns
+
+### Returning Structured Data
+
+```sql
+CREATE OR REPLACE FUNCTION GET_ACCOUNT_SUMMARY(ACCOUNT_NUMBER STRING)
+RETURNS VARIANT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'get_summary'
+AS
+$$
+import snowflake.snowpark as snowpark
+import json
+
+def get_summary(session: snowpark.Session, account_number: str):
+    """Get comprehensive account summary"""
+    
+    # Get account details
+    account_result = session.sql(f"""
+        SELECT FULL_NAME, BALANCE_AED, ACCOUNT_TYPE
+        FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+        WHERE ACCOUNT_NUMBER = '{account_number}'
+    """).collect()
+    
+    if not account_result:
+        return {"error": "Account not found"}
+    
+    # Get recent transactions
+    txn_result = session.sql(f"""
+        SELECT TRANSACTION_TYPE, AMOUNT, TRANSACTION_DATE
+        FROM MY_APP_DB.DATA.TRANSACTIONS
+        WHERE FROM_ACCOUNT = '{account_number}' 
+           OR TO_ACCOUNT = '{account_number}'
+        ORDER BY TRANSACTION_DATE DESC
+        LIMIT 5
+    """).collect()
+    
+    summary = {
+        "account_number": account_number,
+        "name": account_result[0][0],
+        "balance": float(account_result[0][1]),
+        "type": account_result[0][2],
+        "recent_transactions": [
+            {
+                "type": row[0],
+                "amount": float(row[1]),
+                "date": str(row[2])
+            }
+            for row in txn_result
+        ]
+    }
+    
+    return summary
+$$;
+```
+
+### Error Handling Best Practices
+
+```python
+def robust_function(session, param1, param2):
+    """Function with comprehensive error handling"""
+    
+    # 1. Input validation
+    if not param1 or not param2:
+        return {
+            "status": "error",
+            "error_code": "INVALID_INPUT",
+            "message": "Missing required parameters"
+        }
+    
+    try:
+        # 2. Database operations with error handling
+        result = session.sql("SELECT ...").collect()
+        
+        if not result:
+            return {
+                "status": "error",
+                "error_code": "NOT_FOUND",
+                "message": "Record not found"
+            }
+        
+        # 3. Business logic validation
+        if some_business_rule_violated:
+            return {
+                "status": "error",
+                "error_code": "BUSINESS_RULE_VIOLATION",
+                "message": "Specific reason"
+            }
+        
+        # 4. Success response
+        return {
+            "status": "success",
+            "data": result_data,
+            "message": "Operation completed"
+        }
+        
+    except Exception as e:
+        # 5. Catch-all for unexpected errors
+        return {
+            "status": "error",
+            "error_code": "INTERNAL_ERROR",
+            "message": f"An error occurred: {str(e)}"
+        }
+```
+
+## Common Patterns
+
+### 1. Validation Function
+
+```sql
+CREATE OR REPLACE FUNCTION VALIDATE_ACCOUNT(ACCOUNT_NUMBER STRING)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'validate'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def validate(session: snowpark.Session, account_number: str):
+    """Validate account exists and is active"""
+    
+    result = session.sql(f"""
+        SELECT ACCOUNT_STATUS 
+        FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+        WHERE ACCOUNT_NUMBER = '{account_number}'
+    """).collect()
+    
+    if not result:
+        return "INVALID"
+    
+    status = result[0][0]
+    
+    if status != 'ACTIVE':
+        return f"INACTIVE_{status}"
+    
+    return "VALID"
+$$;
+```
+
+### 2. Calculation Function
+
+```sql
+CREATE OR REPLACE FUNCTION CALCULATE_INTEREST(
+    BALANCE FLOAT,
+    RATE FLOAT,
+    DAYS INT
+)
+RETURNS FLOAT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'calculate'
+AS
+$$
+def calculate(balance, rate, days):
+    """Calculate interest earned"""
+    return balance * (rate / 100) * (days / 365)
+$$;
+```
+
+### 3. Data Transformation
+
+```sql
+CREATE OR REPLACE FUNCTION FORMAT_PHONE(PHONE STRING)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'format_phone'
+AS
+$$
+import re
+
+def format_phone(phone):
+    """Format phone number to standard format"""
+    # Remove non-digits
+    digits = re.sub(r'\D', '', phone)
+    
+    # Format as +X XXX XXX XXXX
+    if len(digits) == 10:
+        return f"+1 {digits[:3]} {digits[3:6]} {digits[6:]}"
+    elif len(digits) == 12:
+        return f"+{digits[:2]} {digits[2:5]} {digits[5:8]} {digits[8:]}"
+    else:
+        return phone  # Return as-is if format unknown
+$$;
+```
+
+## Best Practices
+
+### 1. Always Return JSON for Complex Data
+
+```python
+import json
+
+def my_function(...):
+    result = {"status": "success", "data": {...}}
+    return json.dumps(result)  # Return as JSON string
+```
+
+### 2. Use Snowpark Session
+
+For procedures that access database:
+
+```python
+def my_procedure(session: snowpark.Session, ...):
+    # Use session.sql() for queries
+    result = session.sql("SELECT ...").collect()
+```
+
+### 3. Set Appropriate Timeouts
+
+```json
+{
+  "execution_environment": {
+    "type": "warehouse",
+    "warehouse": "MY_WAREHOUSE",
+    "query_timeout": 30  // 30 seconds (adjust based on complexity)
+  }
+}
+```
+
+### 4. Document Input Schema Clearly
+
+```json
+{
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "AMOUNT": {
+        "description": "Transfer amount in AED (must be positive, max 10000)",
+        "type": "number"
+      }
+    }
+  }
+}
+```
+
+## Common Issues
+
+### Issue: "Function not found"
+
+**Cause**: Function doesn't exist or identifier is wrong
+
+**Solution**:
+```sql
+-- Verify function exists
+SHOW FUNCTIONS IN SCHEMA MY_APP_DB.OPERATIONS;
+
+-- Use fully qualified name
+"identifier": "MY_APP_DB.OPERATIONS.FUNCTION_NAME"
+```
+
+### Issue: Parameters not being passed correctly
+
+**Cause**: Parameter names not UPPERCASE
+
+**Solution**: Use UPPERCASE in input_schema:
+```json
+{
+  "properties": {
+    "AMOUNT": {...},  // ✅ Correct
+    "amount": {...}   // ❌ Wrong
+  }
+}
+```
+
+### Issue: Procedure fails silently
+
+**Cause**: Missing error handling
+
+**Solution**: Wrap in try/except and return error messages:
+```python
+try:
+    # operations
+    return '{"status": "success"}'
+except Exception as e:
+    return f'{{"status": "error", "message": "{str(e)}"}}'
+```
+
+## Performance Optimization
+
+1. **Use appropriate warehouse size** - Larger warehouses for complex operations
+2. **Minimize database round trips** - Batch operations when possible
+3. **Cache frequently used data** - Store in variables
+4. **Set reasonable timeouts** - Don't wait forever for failures
+
+## Security Considerations
+
+1. **Validate all inputs** - Never trust user input
+2. **Use parameterized queries** - Prevent SQL injection
+3. **Check permissions** - Verify user has access
+4. **Log sensitive operations** - Audit trail for transfers/updates
+
+## Next Steps
+
+After creating custom tools:
+1. Test independently before adding to agent
+2. Document expected inputs/outputs
+3. Add to agent specification
+4. Update agent instructions
+5. Test via agent integration
+# Custom Tools (Python UDFs and Stored Procedures)
+
+Custom tools allow your Cortex Agent to execute business logic beyond querying and searching - like transfers, updates, calculations, and integrations.
+
+## Types of Custom Tools
+
+1. **Python UDFs (User-Defined Functions)** - Return values, pure functions
+2. **Stored Procedures** - Execute actions, modify data
+3. **External Functions** - Call external APIs (advanced)
+
+## When to Use Custom Tools
+
+Use custom tools when you need to:
+- Execute transactions (transfers, updates)
+- Perform complex calculations
+- Validate business rules
+- Integrate with external systems
+- Modify database state
+
+## Creating Python UDFs
+
+### Simple Function Example
+
+**File**: `cortex/create_custom_tools.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE MY_APP_DB;
+USE SCHEMA OPERATIONS;
+USE WAREHOUSE MY_WAREHOUSE;
+
+-- Example: Calculate transfer fee
+CREATE OR REPLACE FUNCTION CALCULATE_FEE(
+    AMOUNT FLOAT,
+    CURRENCY STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'calculate_fee'
+AS
+$$
+def calculate_fee(amount, currency):
+    """Calculate transfer fee based on amount and currency"""
+    
+    # Business logic
+    if currency == 'USD':
+        fee = amount * 0.01  # 1% for USD
+    elif currency == 'EUR':
+        fee = amount * 0.015  # 1.5% for EUR
+    else:
+        fee = amount * 0.02  # 2% for others
+    
+    # Minimum fee
+    fee = max(fee, 5.0)
+    
+    return f"Transfer fee: {fee:.2f} {currency}"
+$$;
+
+-- Test the function
+SELECT CALCULATE_FEE(1000, 'USD');
+SELECT CALCULATE_FEE(100, 'EUR');
+```
+
+## Creating Stored Procedures
+
+Stored procedures can modify data and execute transactions.
+
+### Transfer Money Example
+
+```sql
+CREATE OR REPLACE PROCEDURE TRANSFER_MONEY(
+    AMOUNT FLOAT,
+    FROM_ACCOUNT STRING,
+    TO_ACCOUNT STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'transfer_money'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def transfer_money(session: snowpark.Session, amount: float, from_account: str, to_account: str):
+    """Execute money transfer between accounts"""
+    
+    # Validate inputs
+    if amount <= 0:
+        return '{"status": "error", "message": "Amount must be positive"}'
+    
+    try:
+        # Check source account exists and has sufficient balance
+        result = session.sql(f"""
+            SELECT BALANCE_AED 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        if not result:
+            return '{"status": "error", "message": "Source account not found"}'
+        
+        balance = float(result[0][0])
+        
+        if balance < amount:
+            return '{"status": "error", "message": "Insufficient funds"}'
+        
+        # Check destination account exists
+        result = session.sql(f"""
+            SELECT ACCOUNT_NUMBER 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{to_account}'
+        """).collect()
+        
+        if not result:
+            return '{"status": "error", "message": "Destination account not found"}'
+        
+        # Calculate fee (1%)
+        fee = amount * 0.01
+        total_deduction = amount + fee
+        
+        # Deduct from source account
+        session.sql(f"""
+            UPDATE MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            SET BALANCE_AED = BALANCE_AED - {total_deduction},
+                LAST_UPDATED = CURRENT_TIMESTAMP()
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        # Add to destination account
+        session.sql(f"""
+            UPDATE MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            SET BALANCE_AED = BALANCE_AED + {amount},
+                LAST_UPDATED = CURRENT_TIMESTAMP()
+            WHERE ACCOUNT_NUMBER = '{to_account}'
+        """).collect()
+        
+        # Record transaction
+        session.sql(f"""
+            INSERT INTO MY_APP_DB.DATA.TRANSACTIONS 
+                (CUSTOMER_ID, TRANSACTION_TYPE, AMOUNT, CURRENCY, 
+                 FROM_ACCOUNT, TO_ACCOUNT, FEE_AED, STATUS)
+            SELECT 
+                CUSTOMER_ID,
+                'TRANSFER',
+                {amount},
+                'AED',
+                '{from_account}',
+                '{to_account}',
+                {fee},
+                'COMPLETED'
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        # Get new balance
+        result = session.sql(f"""
+            SELECT BALANCE_AED 
+            FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+            WHERE ACCOUNT_NUMBER = '{from_account}'
+        """).collect()
+        
+        new_balance = float(result[0][0])
+        
+        return f'{{"status": "success", "message": "Transfer completed", "amount": {amount}, "fee": {fee}, "new_balance": {new_balance}}}'
+        
+    except Exception as e:
+        return f'{{"status": "error", "message": "Transfer failed: {str(e)}"}}'
+$$;
+
+-- Test the procedure
+CALL TRANSFER_MONEY(100, 'ACC001', 'ACC002');
+```
+
+### Currency Exchange Example
+
+```sql
+CREATE OR REPLACE PROCEDURE EXCHANGE_CURRENCY(
+    AMOUNT FLOAT,
+    FROM_CURRENCY STRING,
+    TO_CURRENCY STRING
+)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'exchange_currency'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def exchange_currency(session: snowpark.Session, amount: float, from_currency: str, to_currency: str):
+    """Exchange currency"""
+    
+    if amount <= 0:
+        return '{"status": "error", "message": "Amount must be positive"}'
+    
+    try:
+        # Get exchange rate
+        result = session.sql(f"""
+            SELECT BUY_RATE, SELL_RATE
+            FROM MY_APP_DB.OPERATIONS.EXCHANGE_RATES
+            WHERE CURRENCY_FROM = '{from_currency}'
+              AND CURRENCY_TO = '{to_currency}'
+            ORDER BY RATE_DATE DESC
+            LIMIT 1
+        """).collect()
+        
+        if not result:
+            return f'{{"status": "error", "message": "Exchange rate not available for {from_currency} to {to_currency}"}}'
+        
+        buy_rate = float(result[0][0])
+        sell_rate = float(result[0][1])
+        
+        # Use sell rate (bank sells to customer)
+        converted_amount = amount * sell_rate
+        
+        # Calculate fee (0.5%)
+        fee = amount * 0.005
+        
+        return f'{{"status": "success", "from_amount": {amount}, "from_currency": "{from_currency}", "to_amount": {converted_amount:.2f}, "to_currency": "{to_currency}", "rate": {sell_rate}, "fee": {fee}}}'
+        
+    except Exception as e:
+        return f'{{"status": "error", "message": "Exchange failed: {str(e)}"}}'
+$$;
+
+-- Test
+CALL EXCHANGE_CURRENCY(1000, 'AED', 'USD');
+```
+
+## Adding Custom Tools to Agent
+
+### 1. Define Tool in Agent Specification
+
+```sql
+CREATE OR REPLACE AGENT MY_APP_AGENT
+FROM SPECIFICATION $$
+{
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "generic",
+        "name": "transfer_money",
+        "description": "Execute money transfer between accounts. Always ask for user confirmation before executing.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "AMOUNT": {
+              "description": "Amount to transfer (positive number)",
+              "type": "number"
+            },
+            "FROM_ACCOUNT": {
+              "description": "Source account number",
+              "type": "string"
+            },
+            "TO_ACCOUNT": {
+              "description": "Destination account number",
+              "type": "string"
+            }
+          },
+          "required": ["AMOUNT", "FROM_ACCOUNT", "TO_ACCOUNT"]
+        }
+      }
+    }
+  ],
+  "tool_resources": {
+    "transfer_money": {
+      "type": "procedure",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "MY_WAREHOUSE",
+        "query_timeout": 30
+      },
+      "identifier": "MY_APP_DB.OPERATIONS.TRANSFER_MONEY"
+    }
+  }
+}
+$$;
+```
+
+**⚠️ Critical**:
+- Parameter names in `input_schema` MUST be UPPERCASE
+- `identifier` must be fully qualified: `DATABASE.SCHEMA.FUNCTION_NAME`
+- Use `"type": "procedure"` for procedures, `"type": "function"` for UDFs
+
+### 2. Update Agent Instructions
+
+Tell the agent when and how to use the tool:
+
+```json
+{
+  "orchestration": "For money transfers:\n1. Extract amount, from_account, to_account from user request\n2. Confirm details with user\n3. Only after explicit confirmation, call transfer_money\n4. Report success/failure clearly"
+}
+```
+
+## Testing Custom Tools
+
+### Test Function Directly
+
+```sql
+-- Test UDF
+SELECT CALCULATE_FEE(500, 'USD');
+
+-- Test Procedure
+CALL TRANSFER_MONEY(100, 'ACC001', 'ACC002');
+
+-- Verify results
+SELECT * FROM MY_APP_DB.DATA.TRANSACTIONS 
+ORDER BY TRANSACTION_DATE DESC 
+LIMIT 5;
+```
+
+### Test via Agent
+
+```python
+# test_custom_tools.py
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+url = f"https://{os.getenv('SNOWFLAKE_HOST')}/api/v2/databases/SNOWFLAKE_INTELLIGENCE/schemas/AGENTIC/agents/MY_APP_AGENT:run"
+
+headers = {
+    "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "messages": [
+        {
+            "role": "user",
+            "content": [{"type": "text", "text": "Transfer 100 AED from ACC001 to ACC002"}]
+        }
+    ]
+}
+
+response = requests.post(url, headers=headers, json=payload)
+print(response.json())
+```
+
+## Advanced Patterns
+
+### Returning Structured Data
+
+```sql
+CREATE OR REPLACE FUNCTION GET_ACCOUNT_SUMMARY(ACCOUNT_NUMBER STRING)
+RETURNS VARIANT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'get_summary'
+AS
+$$
+import snowflake.snowpark as snowpark
+import json
+
+def get_summary(session: snowpark.Session, account_number: str):
+    """Get comprehensive account summary"""
+    
+    # Get account details
+    account_result = session.sql(f"""
+        SELECT FULL_NAME, BALANCE_AED, ACCOUNT_TYPE
+        FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS
+        WHERE ACCOUNT_NUMBER = '{account_number}'
+    """).collect()
+    
+    if not account_result:
+        return {"error": "Account not found"}
+    
+    # Get recent transactions
+    txn_result = session.sql(f"""
+        SELECT TRANSACTION_TYPE, AMOUNT, TRANSACTION_DATE
+        FROM MY_APP_DB.DATA.TRANSACTIONS
+        WHERE FROM_ACCOUNT = '{account_number}' 
+           OR TO_ACCOUNT = '{account_number}'
+        ORDER BY TRANSACTION_DATE DESC
+        LIMIT 5
+    """).collect()
+    
+    summary = {
+        "account_number": account_number,
+        "name": account_result[0][0],
+        "balance": float(account_result[0][1]),
+        "type": account_result[0][2],
+        "recent_transactions": [
+            {
+                "type": row[0],
+                "amount": float(row[1]),
+                "date": str(row[2])
+            }
+            for row in txn_result
+        ]
+    }
+    
+    return summary
+$$;
+```
+
+### Error Handling Best Practices
+
+```python
+def robust_function(session, param1, param2):
+    """Function with comprehensive error handling"""
+    
+    # 1. Input validation
+    if not param1 or not param2:
+        return {
+            "status": "error",
+            "error_code": "INVALID_INPUT",
+            "message": "Missing required parameters"
+        }
+    
+    try:
+        # 2. Database operations with error handling
+        result = session.sql("SELECT ...").collect()
+        
+        if not result:
+            return {
+                "status": "error",
+                "error_code": "NOT_FOUND",
+                "message": "Record not found"
+            }
+        
+        # 3. Business logic validation
+        if some_business_rule_violated:
+            return {
+                "status": "error",
+                "error_code": "BUSINESS_RULE_VIOLATION",
+                "message": "Specific reason"
+            }
+        
+        # 4. Success response
+        return {
+            "status": "success",
+            "data": result_data,
+            "message": "Operation completed"
+        }
+        
+    except Exception as e:
+        # 5. Catch-all for unexpected errors
+        return {
+            "status": "error",
+            "error_code": "INTERNAL_ERROR",
+            "message": f"An error occurred: {str(e)}"
+        }
+```
+
+## Common Patterns
+
+### 1. Validation Function
+
+```sql
+CREATE OR REPLACE FUNCTION VALIDATE_ACCOUNT(ACCOUNT_NUMBER STRING)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+PACKAGES = ('snowflake-snowpark-python')
+HANDLER = 'validate'
+AS
+$$
+import snowflake.snowpark as snowpark
+
+def validate(session: snowpark.Session, account_number: str):
+    """Validate account exists and is active"""
+    
+    result = session.sql(f"""
+        SELECT ACCOUNT_STATUS 
+        FROM MY_APP_DB.DATA.CUSTOMER_ACCOUNTS 
+        WHERE ACCOUNT_NUMBER = '{account_number}'
+    """).collect()
+    
+    if not result:
+        return "INVALID"
+    
+    status = result[0][0]
+    
+    if status != 'ACTIVE':
+        return f"INACTIVE_{status}"
+    
+    return "VALID"
+$$;
+```
+
+### 2. Calculation Function
+
+```sql
+CREATE OR REPLACE FUNCTION CALCULATE_INTEREST(
+    BALANCE FLOAT,
+    RATE FLOAT,
+    DAYS INT
+)
+RETURNS FLOAT
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'calculate'
+AS
+$$
+def calculate(balance, rate, days):
+    """Calculate interest earned"""
+    return balance * (rate / 100) * (days / 365)
+$$;
+```
+
+### 3. Data Transformation
+
+```sql
+CREATE OR REPLACE FUNCTION FORMAT_PHONE(PHONE STRING)
+RETURNS STRING
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.10'
+HANDLER = 'format_phone'
+AS
+$$
+import re
+
+def format_phone(phone):
+    """Format phone number to standard format"""
+    # Remove non-digits
+    digits = re.sub(r'\D', '', phone)
+    
+    # Format as +X XXX XXX XXXX
+    if len(digits) == 10:
+        return f"+1 {digits[:3]} {digits[3:6]} {digits[6:]}"
+    elif len(digits) == 12:
+        return f"+{digits[:2]} {digits[2:5]} {digits[5:8]} {digits[8:]}"
+    else:
+        return phone  # Return as-is if format unknown
+$$;
+```
+
+## Best Practices
+
+### 1. Always Return JSON for Complex Data
+
+```python
+import json
+
+def my_function(...):
+    result = {"status": "success", "data": {...}}
+    return json.dumps(result)  # Return as JSON string
+```
+
+### 2. Use Snowpark Session
+
+For procedures that access database:
+
+```python
+def my_procedure(session: snowpark.Session, ...):
+    # Use session.sql() for queries
+    result = session.sql("SELECT ...").collect()
+```
+
+### 3. Set Appropriate Timeouts
+
+```json
+{
+  "execution_environment": {
+    "type": "warehouse",
+    "warehouse": "MY_WAREHOUSE",
+    "query_timeout": 30  // 30 seconds (adjust based on complexity)
+  }
+}
+```
+
+### 4. Document Input Schema Clearly
+
+```json
+{
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "AMOUNT": {
+        "description": "Transfer amount in AED (must be positive, max 10000)",
+        "type": "number"
+      }
+    }
+  }
+}
+```
+
+## Common Issues
+
+### Issue: "Function not found"
+
+**Cause**: Function doesn't exist or identifier is wrong
+
+**Solution**:
+```sql
+-- Verify function exists
+SHOW FUNCTIONS IN SCHEMA MY_APP_DB.OPERATIONS;
+
+-- Use fully qualified name
+"identifier": "MY_APP_DB.OPERATIONS.FUNCTION_NAME"
+```
+
+### Issue: Parameters not being passed correctly
+
+**Cause**: Parameter names not UPPERCASE
+
+**Solution**: Use UPPERCASE in input_schema:
+```json
+{
+  "properties": {
+    "AMOUNT": {...},  // ✅ Correct
+    "amount": {...}   // ❌ Wrong
+  }
+}
+```
+
+### Issue: Procedure fails silently
+
+**Cause**: Missing error handling
+
+**Solution**: Wrap in try/except and return error messages:
+```python
+try:
+    # operations
+    return '{"status": "success"}'
+except Exception as e:
+    return f'{{"status": "error", "message": "{str(e)}"}}'
+```
+
+## Performance Optimization
+
+1. **Use appropriate warehouse size** - Larger warehouses for complex operations
+2. **Minimize database round trips** - Batch operations when possible
+3. **Cache frequently used data** - Store in variables
+4. **Set reasonable timeouts** - Don't wait forever for failures
+
+## Security Considerations
+
+1. **Validate all inputs** - Never trust user input
+2. **Use parameterized queries** - Prevent SQL injection
+3. **Check permissions** - Verify user has access
+4. **Log sensitive operations** - Audit trail for transfers/updates
+
+## Next Steps
+
+After creating custom tools:
+1. Test independently before adding to agent
+2. Document expected inputs/outputs
+3. Add to agent specification
+4. Update agent instructions
+5. Test via agent integration

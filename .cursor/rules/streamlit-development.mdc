@@ -1,0 +1,96 @@
+---
+description: Streamlit application development standards and patterns
+alwaysApply: false
+---
+# Streamlit Development Rules
+
+## Multi-File Architecture
+- Main entry point: `streamlit_app.py`
+- Utility modules: `utils/data_loader.py`, `utils/charts.py`
+- Demonstrate that Streamlit apps can import from multiple files
+- One main file selected in Snowsight, but can use unlimited supporting files
+
+## Dependency Management
+- Core dependencies in `requirements.txt`: streamlit, pandas, numpy, snowflake-connector-python
+- Optional dependencies (like plotly) should have graceful fallbacks
+- Use try/except for optional imports with Streamlit built-in chart alternatives
+
+## Chart Fallback Strategy
+- Primary: Use plotly for enhanced visualizations when available
+- Always provide meaningful alternatives when dependencies unavailable
+
+## Import Pattern for Optional Dependencies
+```python
+try:
+    import plotly.express as px
+    PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+    st.warning("Plotly not available. Using Streamlit built-in charts.")
+```
+
+## Error Handling Patterns
+- Always use try/except for optional dependencies
+- Provide meaningful fallbacks for missing packages
+- Log warnings for missing features, not errors
+- Use Streamlit's built-in connection management when possible
+
+## AI Summary Optimization
+
+
+## Tab Persistence and State Management
+
+### Tab Behavior Differences
+- **Local Streamlit**: More forgiving with state preservation during reruns
+- **Hosted Snowflake Streamlit**: More sensitive to state reset operations
+- **Key Issue**: `st.cache_data.clear()` causes tab reset in hosted environment
+
+### Tab Persistence Best Practices
+- **Use `st.tabs()` for visual consistency** - maintains beautiful side-by-side appearance
+- **Avoid `st.cache_data.clear()` after form submissions** - causes tab jumping in hosted environment
+- **Prefer cache TTL over manual clearing** - let Streamlit handle cache expiration naturally
+- **Remove `st.rerun()` when possible** - can cause unwanted tab resets
+
+### Form Success Handling Pattern
+```python
+# GOOD - Shows message immediately, stays in tab
+if success:
+    st.success("✅ Record updated successfully!")
+    st.warning("⏱️ Changes appear within 1 minute due to dynamic table refresh.")
+
+# BAD - Causes tab reset in hosted environment  
+if success:
+    st.cache_data.clear()  # ← Avoid this!
+    st.session_state.success = True
+    st.rerun()  # ← Avoid this!
+```
+
+### Environment-Specific Behavior
+- Test tab persistence in **both local and hosted** environments
+- Hosted Streamlit is more strict about state management
+- What works locally may reset tabs online
+
+## Testing and Error Checking
+
+### Proper App Testing Protocol
+- **ALWAYS run the app properly** with `streamlit run streamlit_app.py`
+- **Check for actual errors** by monitoring terminal output
+- **Verify app accessibility** with HTTP status check
+- **NEVER use unnecessary commands** like `sleep 5 && echo "message"`
+
+### Error Checking Best Practices
+```bash
+# GOOD - Proper testing approach
+streamlit run streamlit_app.py &
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8501
+
+# BAD - Wastes time and doesn't check real status  
+sleep 5 && echo "App should be running"
+```
+
+### When Errors Occur
+- **Read the actual error messages** from terminal output
+- **Fix the root cause** rather than masking with delays
+- **Test immediately** after each fix
+- **Verify functionality** before proceeding
+

@@ -1,0 +1,565 @@
+# Semantic Models for Cortex Analyst
+
+Semantic models define your data schema for Cortex Analyst (Text-to-SQL). They tell the AI what data is available, how it's structured, and what queries are valid.
+
+## What is a Semantic Model?
+
+A semantic model is a YAML file that describes:
+- **Tables**: What tables exist
+- **Dimensions**: Categorical/descriptive columns (IDs, names, statuses)
+- **Facts**: Measurable/numeric columns (amounts, counts, metrics)
+- **Relationships**: How tables connect (foreign keys)
+- **Synonyms**: Alternative names users might use
+- **Verified Queries**: Pre-tested queries for common questions
+
+## Basic Structure
+
+```yaml
+name: my_semantic_model
+tables:
+  - name: table_name
+    description: What this table contains
+    base_table:
+      database: DATABASE_NAME
+      schema: SCHEMA_NAME
+      table: TABLE_NAME
+    dimensions:
+      - name: column_name
+        synonyms: [alternative_name1, alternative_name2]
+        description: What this column represents
+        expr: COLUMN_NAME
+        data_type: TEXT|NUMBER|DATE
+    facts:
+      - name: measure_name
+        synonyms: [alternative_name1, alternative_name2]
+        description: What this measures
+        expr: COLUMN_NAME or SQL expression
+        data_type: NUMBER
+    primary_key:
+      columns:
+        - COLUMN_NAME
+    relationships:
+      - to: other_table
+        type: many_to_one|one_to_many|one_to_one
+        join_columns:
+          - from: THIS_COLUMN
+            to: OTHER_COLUMN
+verified_queries:
+  - name: query_name
+    question: Natural language question
+    sql: Exact SQL to execute
+```
+
+## Example: Customer & Transactions
+
+**File**: `cortex/semantic_model.yaml`
+
+```yaml
+name: customer_transaction_model
+
+tables:
+  # ========================================================================
+  # CUSTOMERS TABLE
+  # ========================================================================
+  - name: customers
+    description: Customer information including contact details and account info
+    base_table:
+      database: MY_APP_DB
+      schema: DATA
+      table: CUSTOMERS
+    
+    dimensions:
+      - name: customer_id
+        synonyms:
+          - customer
+          - client id
+          - account holder
+        description: Unique identifier for each customer
+        expr: CUSTOMER_ID
+        data_type: NUMBER
+      
+      - name: full_name
+        synonyms:
+          - name
+          - customer name
+          - client name
+        description: Customer's full name
+        expr: FULL_NAME
+        data_type: TEXT
+      
+      - name: email
+        synonyms:
+          - email address
+          - contact email
+        description: Customer's email address
+        expr: EMAIL
+        data_type: TEXT
+      
+      - name: phone
+        synonyms:
+          - phone number
+          - mobile
+          - contact number
+        description: Customer's phone number
+        expr: PHONE
+        data_type: TEXT
+    
+    facts:
+      - name: total_customers
+        synonyms:
+          - customer count
+          - number of customers
+        description: Total count of customers
+        expr: COUNT(*)
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - CUSTOMER_ID
+
+  # ========================================================================
+  # TRANSACTIONS TABLE
+  # ========================================================================
+  - name: transactions
+    description: Transaction history including amounts, dates, and status
+    base_table:
+      database: MY_APP_DB
+      schema: DATA
+      table: TRANSACTIONS
+    
+    dimensions:
+      - name: transaction_id
+        synonyms:
+          - transaction
+          - txn id
+        description: Unique transaction identifier
+        expr: TRANSACTION_ID
+        data_type: NUMBER
+      
+      - name: customer_id
+        synonyms:
+          - customer
+          - client
+        description: Customer who made the transaction
+        expr: CUSTOMER_ID
+        data_type: NUMBER
+      
+      - name: transaction_date
+        synonyms:
+          - date
+          - when
+          - transaction time
+        description: When the transaction occurred
+        expr: TRANSACTION_DATE
+        data_type: DATE
+      
+      - name: currency
+        synonyms:
+          - currency code
+        description: Currency of the transaction
+        expr: CURRENCY
+        data_type: TEXT
+      
+      - name: status
+        synonyms:
+          - transaction status
+          - state
+        description: Current status (COMPLETED, PENDING, FAILED)
+        expr: STATUS
+        data_type: TEXT
+    
+    facts:
+      - name: amount
+        synonyms:
+          - transaction amount
+          - value
+          - total
+        description: Transaction amount
+        expr: AMOUNT
+        data_type: NUMBER
+      
+      - name: total_transactions
+        synonyms:
+          - transaction count
+          - number of transactions
+        description: Count of transactions
+        expr: COUNT(*)
+        data_type: NUMBER
+      
+      - name: total_amount
+        synonyms:
+          - sum of transactions
+          - total value
+        description: Sum of all transaction amounts
+        expr: SUM(AMOUNT)
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - TRANSACTION_ID
+    
+    relationships:
+      - to: customers
+        type: many_to_one
+        join_columns:
+          - from: CUSTOMER_ID
+            to: CUSTOMER_ID
+
+# ========================================================================
+# VERIFIED QUERIES (Optional but Recommended)
+# ========================================================================
+verified_queries:
+  - name: customer_balance
+    question: What is the balance for customer ID {customer_id}?
+    sql: |
+      SELECT 
+        c.FULL_NAME,
+        c.CUSTOMER_ID,
+        COALESCE(SUM(t.AMOUNT), 0) AS BALANCE
+      FROM MY_APP_DB.DATA.CUSTOMERS c
+      LEFT JOIN MY_APP_DB.DATA.TRANSACTIONS t 
+        ON c.CUSTOMER_ID = t.CUSTOMER_ID
+      WHERE c.CUSTOMER_ID = {customer_id}
+      GROUP BY c.FULL_NAME, c.CUSTOMER_ID
+  
+  - name: recent_transactions
+    question: Show me the last {limit} transactions for customer {customer_id}
+    sql: |
+      SELECT 
+        TRANSACTION_ID,
+        TRANSACTION_DATE,
+        AMOUNT,
+        CURRENCY,
+        STATUS
+      FROM MY_APP_DB.DATA.TRANSACTIONS
+      WHERE CUSTOMER_ID = {customer_id}
+      ORDER BY TRANSACTION_DATE DESC
+      LIMIT {limit}
+  
+  - name: total_transaction_volume
+    question: What is the total transaction volume?
+    sql: |
+      SELECT 
+        COUNT(*) AS TOTAL_TRANSACTIONS,
+        SUM(AMOUNT) AS TOTAL_AMOUNT,
+        AVG(AMOUNT) AS AVERAGE_AMOUNT
+      FROM MY_APP_DB.DATA.TRANSACTIONS
+      WHERE STATUS = 'COMPLETED'
+```
+
+## Upload Semantic Model to Snowflake
+
+### 1. Create Stage with DIRECTORY Enabled (CRITICAL!)
+
+```sql
+USE DATABASE MY_APP_DB;
+USE SCHEMA SEMANTIC_MODELS;
+
+-- ⚠️ CRITICAL: Enable DIRECTORY = TRUE for Snowsight UI visibility
+CREATE STAGE IF NOT EXISTS SEMANTIC_MODEL_STAGE
+  DIRECTORY = (ENABLE = TRUE)
+  COMMENT = 'Stage for semantic model YAML files';
+```
+
+**⚠️ IMPORTANT**: If the stage already exists without DIRECTORY enabled, alter it:
+```sql
+ALTER STAGE SEMANTIC_MODEL_STAGE SET DIRECTORY = (ENABLE = TRUE);
+```
+
+**Why this matters**: Snowsight Cortex Analyst UI can only see semantic models on stages with DIRECTORY enabled.
+
+### 2. Upload via Snow CLI
+
+```bash
+# Upload semantic model
+snow sql -q "PUT file://cortex/semantic_model.yaml @MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE auto_compress=false overwrite=true;"
+
+# Verify upload
+snow sql -q "LS @MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE/semantic_model.yaml;"
+```
+
+### 3. Update Semantic Model (After Changes)
+
+```bash
+# Re-upload after editing
+snow sql -q "PUT file://cortex/semantic_model.yaml @MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE auto_compress=false overwrite=true;"
+
+# Agent will automatically use updated model
+```
+
+## Best Practices
+
+### 1. Synonyms
+
+Provide multiple ways users might refer to the same thing:
+
+```yaml
+dimensions:
+  - name: customer_id
+    synonyms:
+      - customer
+      - client
+      - account holder
+      - user id
+      - account id
+```
+
+### 2. Clear Descriptions
+
+Write descriptions as if explaining to a non-technical user:
+
+```yaml
+# ❌ BAD
+description: FK to customers table
+
+# ✅ GOOD
+description: Customer who made this transaction
+```
+
+### 3. Facts vs Dimensions
+
+**Dimensions** = Things you filter/group by:
+- IDs (customer_id, transaction_id)
+- Text (names, statuses, categories)
+- Dates (transaction_date, created_date)
+
+**Facts** = Things you measure/calculate:
+- Amounts (price, balance, total)
+- Counts (number of transactions)
+- Aggregations (SUM, AVG, COUNT)
+
+### 4. Relationships
+
+Define relationships to enable joins:
+
+```yaml
+relationships:
+  - to: customers            # Target table
+    type: many_to_one        # Many transactions to one customer
+    join_columns:
+      - from: CUSTOMER_ID    # Column in transactions table
+        to: CUSTOMER_ID      # Column in customers table
+```
+
+### 5. Verified Queries
+
+Use verified queries for:
+- Common questions users will ask
+- Queries that need specific filtering (e.g., demo customer)
+- Complex analytical queries
+- Queries requiring specific date logic
+
+```yaml
+verified_queries:
+  - name: demo_customer_balance
+    question: What is my account balance?
+    sql: |
+      SELECT 
+        c.FULL_NAME,
+        SUM(t.AMOUNT) AS BALANCE
+      FROM MY_APP_DB.DATA.CUSTOMERS c
+      LEFT JOIN MY_APP_DB.DATA.TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID
+      WHERE c.CUSTOMER_ID = 1  -- Demo customer
+      GROUP BY c.FULL_NAME
+```
+
+## Advanced Features
+
+### Time-Based Filters
+
+```yaml
+verified_queries:
+  - name: transactions_this_month
+    question: Show me transactions this month
+    sql: |
+      SELECT *
+      FROM MY_APP_DB.DATA.TRANSACTIONS
+      WHERE MONTH(TRANSACTION_DATE) = MONTH(CURRENT_DATE())
+        AND YEAR(TRANSACTION_DATE) = YEAR(CURRENT_DATE())
+```
+
+### Multi-Table Joins
+
+```yaml
+verified_queries:
+  - name: customer_transaction_summary
+    question: Show me a summary of all customers and their transactions
+    sql: |
+      SELECT 
+        c.FULL_NAME,
+        COUNT(t.TRANSACTION_ID) AS TOTAL_TRANSACTIONS,
+        SUM(t.AMOUNT) AS TOTAL_AMOUNT,
+        AVG(t.AMOUNT) AS AVERAGE_AMOUNT
+      FROM MY_APP_DB.DATA.CUSTOMERS c
+      LEFT JOIN MY_APP_DB.DATA.TRANSACTIONS t 
+        ON c.CUSTOMER_ID = t.CUSTOMER_ID
+      GROUP BY c.FULL_NAME
+      ORDER BY TOTAL_AMOUNT DESC
+```
+
+### Using Views in Semantic Models
+
+If you have complex logic, create views first:
+
+```sql
+-- Create view
+CREATE OR REPLACE VIEW MY_APP_DB.DATA.CUSTOMER_METRICS AS
+SELECT 
+    c.CUSTOMER_ID,
+    c.FULL_NAME,
+    COUNT(t.TRANSACTION_ID) AS TOTAL_TRANSACTIONS,
+    SUM(CASE WHEN t.STATUS = 'COMPLETED' THEN t.AMOUNT ELSE 0 END) AS TOTAL_COMPLETED,
+    AVG(t.AMOUNT) AS AVERAGE_AMOUNT
+FROM CUSTOMERS c
+LEFT JOIN TRANSACTIONS t ON c.CUSTOMER_ID = t.CUSTOMER_ID
+GROUP BY c.CUSTOMER_ID, c.FULL_NAME;
+```
+
+Then reference in semantic model:
+
+```yaml
+tables:
+  - name: customer_metrics
+    description: Pre-calculated customer metrics
+    base_table:
+      database: MY_APP_DB
+      schema: DATA
+      table: CUSTOMER_METRICS  # This is a view
+    dimensions:
+      - name: customer_id
+        expr: CUSTOMER_ID
+        data_type: NUMBER
+    facts:
+      - name: total_transactions
+        expr: TOTAL_TRANSACTIONS
+        data_type: NUMBER
+```
+
+## Testing Semantic Models
+
+Test with Cortex Analyst directly before using in agent:
+
+```python
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Test Cortex Analyst with your semantic model
+url = f"https://{os.getenv('SNOWFLAKE_HOST')}/api/v2/cortex/analyst:analyze"
+headers = {
+    "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+    "Content-Type": "application/json"
+}
+
+payload = {
+    "messages": [
+        {
+            "role": "user", 
+            "content": [{"type": "text", "text": "What is the total transaction volume?"}]
+        }
+    ],
+    "semantic_model_file": "@MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE/semantic_model.yaml"
+}
+
+response = requests.post(url, headers=headers, json=payload)
+print(response.json())
+```
+
+## Common Issues
+
+### Issue: Semantic model not visible in Snowsight UI
+
+**Cause**: Stage does not have DIRECTORY enabled
+
+**Solution**: Enable directory on the stage:
+```sql
+ALTER STAGE MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE 
+  SET DIRECTORY = (ENABLE = TRUE);
+```
+
+Then refresh the Snowsight Cortex Analyst page.
+
+### Issue: "unknown field 'relationships'" error
+
+**Cause**: Relationships defined at wrong level in YAML
+
+**Solution**: Relationships must be at ROOT level, not nested under tables:
+
+```yaml
+# ❌ WRONG
+tables:
+  - name: my_table
+    dimensions: [...]
+    relationships:  # WRONG - nested under table
+      - to: other_table
+        
+# ✅ CORRECT
+tables:
+  - name: my_table
+    dimensions: [...]
+    primary_key: [...]
+
+relationships:  # CORRECT - at root level
+  - name: my_relationship
+    left_table: my_table
+    right_table: other_table
+    relationship_columns:
+      - left_column: MY_ID
+        right_column: OTHER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+```
+
+### Issue: "Unique key column X is not defined as a logical column"
+
+**Cause**: primary_key references a column not defined as dimension or fact
+
+**Solution**: Primary key must reference an existing dimension column:
+```yaml
+tables:
+  - name: employees
+    dimensions:
+      - name: employee_id  # Define this first
+        expr: EMPLOYEE_ID
+        data_type: NUMBER
+    primary_key:
+      columns:
+        - EMPLOYEE_ID  # Must match a dimension's expr
+```
+
+### Issue: "Table not found"
+
+**Cause**: Database/schema/table name mismatch
+
+**Solution**: Verify exact names (case-sensitive in YAML):
+```sql
+SHOW TABLES IN SCHEMA MY_APP_DB.DATA;
+```
+
+### Issue: "Column does not exist"
+
+**Cause**: Column name in `expr` doesn't match actual column
+
+**Solution**: Use exact column names from table:
+```sql
+DESCRIBE TABLE MY_APP_DB.DATA.CUSTOMERS;
+```
+
+### Issue: Analyst returns wrong results
+
+**Cause**: Unclear synonyms or descriptions
+
+**Solution**: 
+1. Add more specific synonyms
+2. Improve descriptions
+3. Add verified queries for common cases
+
+## Next Steps
+
+After creating semantic models:
+1. Test with Cortex Analyst directly
+2. Create Cortex Agent (see `04-cortex-agents.md`)
+3. Add custom tools if needed (see `06-custom-tools.md`)
+

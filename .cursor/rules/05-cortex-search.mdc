@@ -1,0 +1,550 @@
+# Cortex Search for RAG (Retrieval-Augmented Generation)
+
+Cortex Search enables semantic search over unstructured documents like FAQs, policies, manuals, and knowledge bases.
+
+## What is Cortex Search?
+
+Cortex Search is Snowflake's RAG solution that:
+- Indexes unstructured text documents
+- Uses embeddings for semantic search (not just keyword matching)
+- Returns relevant passages for context-aware LLM responses
+- Integrates seamlessly with Cortex Agents
+
+## Architecture
+
+```
+Documents → Table → Cortex Search Service → Agent
+                    ├─ Embedding Model
+                    ├─ Vector Index
+                    └─ Semantic Search
+```
+
+## Setup Process
+
+### Step 1: Prepare Document Table
+
+Create a table to store your documents:
+
+**File**: `data_engineering/setup_knowledge_base.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE MY_APP_DB;
+USE WAREHOUSE MY_WAREHOUSE;
+
+-- Create schema for knowledge base
+CREATE SCHEMA IF NOT EXISTS KNOWLEDGE_BASE;
+USE SCHEMA KNOWLEDGE_BASE;
+
+-- ⚠️ CRITICAL: Create stage with DIRECTORY and ENCRYPTION for Document AI
+CREATE STAGE IF NOT EXISTS DOCUMENT_STAGE
+    DIRECTORY = (ENABLE = TRUE)
+    ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')
+    COMMENT = 'Stage for PDF/document uploads - encryption required for PARSE_DOCUMENT';
+
+-- Create documents table
+CREATE OR REPLACE TABLE DOCUMENTS (
+    DOCUMENT_ID VARCHAR(100) PRIMARY KEY,
+    TITLE VARCHAR(500) NOT NULL,
+    CONTENT TEXT NOT NULL,
+    CATEGORY VARCHAR(100),
+    CREATED_DATE TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+    LAST_UPDATED TIMESTAMP DEFAULT CURRENT_TIMESTAMP()
+);
+
+-- Add index for better performance
+CREATE INDEX IF NOT EXISTS idx_document_category ON DOCUMENTS(CATEGORY);
+```
+
+### Step 2: Load Documents
+
+**Option A: Direct INSERT**
+
+```sql
+INSERT INTO MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS 
+    (DOCUMENT_ID, TITLE, CONTENT, CATEGORY)
+VALUES
+    ('faq_001', 'What is our refund policy?', 
+     'Our refund policy allows returns within 30 days...', 'FAQ'),
+    ('faq_002', 'How do I reset my password?',
+     'To reset your password, click on "Forgot Password"...', 'FAQ'),
+    ('policy_001', 'Privacy Policy',
+     'We collect and process your data...', 'Policy');
+```
+
+**Option B: Load PDFs with Document AI** (Recommended for real documents)
+
+```sql
+-- Upload PDFs to stage
+PUT file://documents/*.pdf @MY_APP_DB.KNOWLEDGE_BASE.DOCUMENT_STAGE AUTO_COMPRESS=FALSE;
+
+-- Refresh stage to register files
+ALTER STAGE MY_APP_DB.KNOWLEDGE_BASE.DOCUMENT_STAGE REFRESH;
+
+-- Parse PDFs and create content table
+CREATE TABLE PARSED_DOCUMENTS AS
+SELECT
+    relative_path,
+    BUILD_STAGE_FILE_URL('@MY_APP_DB.KNOWLEDGE_BASE.DOCUMENT_STAGE', relative_path) as file_url,
+    REGEXP_SUBSTR(relative_path, '[^/]+$') as title,
+    SNOWFLAKE.CORTEX.PARSE_DOCUMENT(
+        @MY_APP_DB.KNOWLEDGE_BASE.DOCUMENT_STAGE,
+        relative_path,
+        {'mode': 'LAYOUT'}
+    ):content::STRING as content
+FROM directory(@MY_APP_DB.KNOWLEDGE_BASE.DOCUMENT_STAGE)
+WHERE relative_path ILIKE '%.pdf';
+```
+
+**⚠️ Requirements for PARSE_DOCUMENT**:
+- Stage MUST have `ENCRYPTION = (TYPE = 'SNOWFLAKE_SSE')`
+- Stage MUST have `DIRECTORY = (ENABLE = TRUE)`
+- PDFs must be valid (test with reportlab example if generating programmatically)
+
+**Option C: Load from CSV**
+
+```python
+# generate_knowledge_base.py
+import pandas as pd
+
+documents = [
+    {
+        'DOCUMENT_ID': 'faq_001',
+        'TITLE': 'What is our refund policy?',
+        'CONTENT': 'Our refund policy allows returns within 30 days of purchase...',
+        'CATEGORY': 'FAQ'
+    },
+    {
+        'DOCUMENT_ID': 'faq_002',
+        'TITLE': 'How do I reset my password?',
+        'CONTENT': 'To reset your password: 1. Click "Forgot Password" 2. Enter your email...',
+        'CATEGORY': 'FAQ'
+    }
+]
+
+df = pd.DataFrame(documents)
+df.to_csv('data/knowledge_base.csv', index=False)
+print(f"✅ Generated {len(df)} documents")
+```
+
+Then load:
+```sql
+-- Upload CSV to stage
+CREATE STAGE IF NOT EXISTS MY_APP_DB.KNOWLEDGE_BASE.DOC_STAGE;
+
+-- From terminal:
+-- PUT file://data/knowledge_base.csv @MY_APP_DB.KNOWLEDGE_BASE.DOC_STAGE;
+
+-- Load into table
+COPY INTO MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS
+FROM @MY_APP_DB.KNOWLEDGE_BASE.DOC_STAGE/knowledge_base.csv
+FILE_FORMAT = (TYPE = CSV SKIP_HEADER = 1);
+
+-- Verify
+SELECT COUNT(*), CATEGORY FROM DOCUMENTS GROUP BY CATEGORY;
+```
+
+**Option C: Load from PDF**
+
+If you have PDF files, extract text first:
+
+```python
+# extract_pdf.py
+import PyPDF2
+import pandas as pd
+
+def extract_pdf_text(pdf_path):
+    """Extract text from PDF"""
+    with open(pdf_path, 'rb') as file:
+        reader = PyPDF2.PdfReader(file)
+        text = ""
+        for page in reader.pages:
+            text += page.extract_text()
+    return text
+
+# Extract text
+pdf_text = extract_pdf_text('data/policy_document.pdf')
+
+# Create document record
+doc = {
+    'DOCUMENT_ID': 'policy_001',
+    'TITLE': 'Company Policy Document',
+    'CONTENT': pdf_text,
+    'CATEGORY': 'Policy'
+}
+
+# Save to CSV or insert directly
+```
+
+### Step 3: Create Cortex Search Service
+
+**File**: `cortex/create_search_service.sql`
+
+```sql
+USE ROLE ACCOUNTADMIN;
+USE DATABASE MY_APP_DB;
+USE SCHEMA KNOWLEDGE_BASE;
+USE WAREHOUSE MY_WAREHOUSE;
+
+-- Drop if exists (for updates)
+DROP CORTEX SEARCH SERVICE IF EXISTS MY_SEARCH_SERVICE;
+
+-- Create search service
+CREATE CORTEX SEARCH SERVICE MY_SEARCH_SERVICE
+    ON CONTENT                                    -- Column to search
+    ATTRIBUTES DOCUMENT_ID, TITLE, CATEGORY      -- Metadata columns to return
+    WAREHOUSE = MY_WAREHOUSE                     -- Warehouse for indexing
+    TARGET_LAG = '1 day'                         -- How often to refresh
+    EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'  -- Embedding model
+    AS (
+        SELECT 
+            DOCUMENT_ID,
+            TITLE,
+            CATEGORY,
+            CONTENT
+        FROM MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS
+    );
+
+-- Verify creation
+SHOW CORTEX SEARCH SERVICES;
+
+SELECT 'Cortex Search Service created successfully!' AS STATUS;
+```
+
+**Execute**:
+```bash
+snow sql -f cortex/create_search_service.sql
+```
+
+### Step 4: Test Search Service
+
+```sql
+-- Test search
+SELECT 
+    DOCUMENT_ID,
+    TITLE,
+    CATEGORY
+FROM TABLE(
+    MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE(
+        'How do I reset my password?',
+        5  -- max results
+    )
+);
+```
+
+## Embedding Models
+
+Snowflake provides several embedding models:
+
+| Model | Description | Use Case |
+|-------|-------------|----------|
+| `snowflake-arctic-embed-l-v2.0` | Large model, best quality | Recommended for most cases |
+| `snowflake-arctic-embed-m-v2.0` | Medium model | Balance of speed/quality |
+| `snowflake-arctic-embed-s-v2.0` | Small model | Faster, lower cost |
+
+**Recommendation**: Start with `snowflake-arctic-embed-l-v2.0`.
+
+## Search Service Configuration
+
+### Target Lag
+
+How often to refresh the index:
+
+```sql
+TARGET_LAG = '1 day'    -- Daily refresh (recommended for mostly static docs)
+TARGET_LAG = '1 hour'   -- Hourly refresh (for frequently updated docs)
+TARGET_LAG = '5 minutes' -- Near real-time (higher cost)
+```
+
+### Attributes
+
+Columns to return with search results:
+
+```sql
+ATTRIBUTES DOCUMENT_ID, TITLE, CATEGORY, AUTHOR, CREATED_DATE
+-- Return these columns along with content snippets
+```
+
+**Best Practice**: Include enough metadata to:
+- Uniquely identify documents (DOCUMENT_ID)
+- Display titles in responses (TITLE)
+- Filter by category if needed (CATEGORY)
+
+## Integrating with Cortex Agent
+
+Add Cortex Search as a tool in your agent:
+
+```sql
+CREATE OR REPLACE AGENT MY_APP_AGENT
+FROM SPECIFICATION $$
+{
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "cortex_search",
+        "name": "knowledge_search",
+        "description": "Search knowledge base for FAQs, policies, procedures, and general information"
+      }
+    }
+  ],
+  "tool_resources": {
+    "knowledge_search": {
+      "search_service": "MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE",
+      "max_results": 5,
+      "id_column": "DOCUMENT_ID",
+      "title_column": "TITLE"
+    }
+  }
+}
+$$;
+```
+
+**⚠️ Important**: 
+- Use `search_service` not `cortex_search_service`
+- Fully qualify service name: `DATABASE.SCHEMA.SERVICE_NAME`
+- `id_column` and `title_column` must match columns in ATTRIBUTES
+
+## Testing Search Functionality
+
+**File**: `tests/test_search.py`
+
+```python
+#!/usr/bin/env python3
+import snowflake.connector
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def test_search():
+    conn = snowflake.connector.connect(
+        account=os.getenv('SNOWFLAKE_ACCOUNT'),
+        user=os.getenv('SNOWFLAKE_USER'),
+        password=os.getenv('SNOWFLAKE_PASSWORD'),
+        warehouse='MY_WAREHOUSE'
+    )
+    
+    cursor = conn.cursor()
+    
+    # Test queries
+    queries = [
+        "How do I reset my password?",
+        "What is the refund policy?",
+        "Tell me about privacy"
+    ]
+    
+    for query in queries:
+        print(f"\n🔍 Query: {query}")
+        
+        cursor.execute(f"""
+            SELECT DOCUMENT_ID, TITLE, CATEGORY
+            FROM TABLE(MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE(
+                '{query}', 5
+            ))
+        """)
+        
+        results = cursor.fetchall()
+        
+        if results:
+            print(f"✅ Found {len(results)} results:")
+            for row in results:
+                print(f"  - {row[1]} (ID: {row[0]}, Category: {row[2]})")
+        else:
+            print("❌ No results found")
+    
+    cursor.close()
+    conn.close()
+
+if __name__ == "__main__":
+    test_search()
+```
+
+**Run**:
+```bash
+python tests/test_search.py
+```
+
+## Updating Documents
+
+### Add New Documents
+
+```sql
+INSERT INTO MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS 
+    (DOCUMENT_ID, TITLE, CONTENT, CATEGORY)
+VALUES
+    ('faq_003', 'New FAQ', 'Content...', 'FAQ');
+
+-- Search service will pick up changes based on TARGET_LAG
+```
+
+### Update Existing Documents
+
+```sql
+UPDATE MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS
+SET CONTENT = 'Updated content...',
+    LAST_UPDATED = CURRENT_TIMESTAMP()
+WHERE DOCUMENT_ID = 'faq_001';
+```
+
+### Refresh Search Service Manually
+
+```sql
+-- Force immediate refresh (if can't wait for TARGET_LAG)
+ALTER CORTEX SEARCH SERVICE MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE REFRESH;
+```
+
+## Advanced Features
+
+### Filtering Results
+
+Add WHERE clauses in the service definition:
+
+```sql
+CREATE CORTEX SEARCH SERVICE MY_SEARCH_SERVICE_PUBLIC
+    ON CONTENT
+    ATTRIBUTES DOCUMENT_ID, TITLE, CATEGORY
+    WAREHOUSE = MY_WAREHOUSE
+    TARGET_LAG = '1 day'
+    EMBEDDING_MODEL = 'snowflake-arctic-embed-l-v2.0'
+    AS (
+        SELECT 
+            DOCUMENT_ID,
+            TITLE,
+            CATEGORY,
+            CONTENT
+        FROM MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS
+        WHERE CATEGORY = 'FAQ'  -- Only index FAQs
+    );
+```
+
+### Multiple Search Services
+
+Create different services for different document types:
+
+```sql
+-- FAQs only
+CREATE CORTEX SEARCH SERVICE FAQ_SEARCH ...
+AS (SELECT * FROM DOCUMENTS WHERE CATEGORY = 'FAQ');
+
+-- Policies only
+CREATE CORTEX SEARCH SERVICE POLICY_SEARCH ...
+AS (SELECT * FROM DOCUMENTS WHERE CATEGORY = 'Policy');
+```
+
+Then use different tools in your agent:
+
+```json
+{
+  "tools": [
+    {
+      "tool_spec": {
+        "type": "cortex_search",
+        "name": "faq_search",
+        "description": "Search FAQs"
+      }
+    },
+    {
+      "tool_spec": {
+        "type": "cortex_search",
+        "name": "policy_search",
+        "description": "Search company policies"
+      }
+    }
+  ]
+}
+```
+
+## Best Practices
+
+### 1. Document Structure
+
+**Good document format**:
+```
+Title: Clear, descriptive title
+Content: Full text with context
+
+Example:
+Title: "How to reset your password"
+Content: "To reset your password, follow these steps: 1. Go to login page..."
+```
+
+**Avoid**:
+- Very short snippets (< 50 words) - not enough context
+- Extremely long documents (> 10K words) - split into sections
+
+### 2. Content Quality
+
+- Use clear, natural language
+- Include common variations of questions
+- Add context and examples
+- Keep information up-to-date
+
+### 3. Categories
+
+Use categories to organize and filter:
+```sql
+CATEGORY IN ('FAQ', 'Policy', 'Guide', 'Tutorial', 'Reference')
+```
+
+### 4. Testing
+
+Test search with:
+- Exact question matches
+- Paraphrased questions
+- Partial information
+- Typos and variations
+
+## Common Issues
+
+### Issue: "Search service not found"
+
+**Cause**: Service name not fully qualified or doesn't exist
+
+**Solution**:
+```sql
+-- Verify service exists
+SHOW CORTEX SEARCH SERVICES IN SCHEMA MY_APP_DB.KNOWLEDGE_BASE;
+
+-- Use fully qualified name in agent
+"search_service": "MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE"
+```
+
+### Issue: No results returned
+
+**Cause**: Index not built or empty table
+
+**Solution**:
+```sql
+-- Check table has data
+SELECT COUNT(*) FROM MY_APP_DB.KNOWLEDGE_BASE.DOCUMENTS;
+
+-- Check service status
+SHOW CORTEX SEARCH SERVICES;
+
+-- Manually refresh
+ALTER CORTEX SEARCH SERVICE MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE REFRESH;
+```
+
+### Issue: Poor quality results
+
+**Solutions**:
+1. Improve document content (add more context)
+2. Add more synonyms and variations
+3. Try larger embedding model
+4. Increase `max_results` in agent config
+
+## Cost Optimization
+
+- **Target Lag**: Longer refresh intervals = lower cost
+- **Document Count**: Index only what's needed
+- **Embedding Model**: Smaller models = faster, cheaper (but lower quality)
+- **Warehouse Size**: Use X-SMALL for small document sets
+
+## Next Steps
+
+After setting up Cortex Search:
+1. Test search quality with various queries
+2. Add to Cortex Agent (see `04-cortex-agents.md`)
+3. Monitor usage and refine documents
+4. Consider multiple search services for different content types
+

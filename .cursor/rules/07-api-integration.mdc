@@ -1,0 +1,603 @@
+# API Integration with Cortex Agents
+
+This guide covers integrating your application with Cortex Agents using the REST API.
+
+## Agent REST API Overview
+
+**Base URL**: `https://{account}.snowflakecomputing.com/api/v2`
+
+**Endpoint**: `/databases/{database}/schemas/{schema}/agents/{agent_name}:run`
+
+**Method**: `POST`
+
+**Authentication**: Personal Access Token (PAT)
+
+## Creating a Python Client
+
+### Basic Client Implementation
+
+**File**: `app/cortex_client.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Snowflake Cortex Agent REST API Client
+"""
+
+import requests
+import json
+from typing import Dict, List, Optional
+
+class CortexAgentClient:
+    """Client for interacting with Snowflake Cortex Agents"""
+    
+    def __init__(self, agent_endpoint: str, pat: str):
+        """
+        Initialize client
+        
+        Args:
+            agent_endpoint: Full agent endpoint URL
+            pat: Personal Access Token
+        """
+        self.endpoint = agent_endpoint
+        self.headers = {
+            "Authorization": f"Bearer {pat}",
+            "Content-Type": "application/json",
+            "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+        }
+    
+    def chat(self, message: str, conversation_history: Optional[List[Dict]] = None) -> Dict:
+        """
+        Send a message to the agent
+        
+        Args:
+            message: User message
+            conversation_history: Optional list of previous messages
+        
+        Returns:
+            Agent response dictionary
+        """
+        # Build messages array
+        messages = conversation_history if conversation_history else []
+        messages.append({
+            "role": "user",
+            "content": [{"type": "text", "text": message}]
+        })
+        
+        payload = {"messages": messages}
+        
+        response = requests.post(
+            self.endpoint,
+            headers=self.headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code == 200:
+            return self._parse_response(response.json())
+        else:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+    
+    def _parse_response(self, response_data: Dict) -> Dict:
+        """Parse agent response"""
+        message = response_data.get('message', {})
+        content = message.get('content', [])
+        
+        # Extract text response
+        text_response = ""
+        for item in content:
+            if item.get('type') == 'text':
+                text_response += item.get('text', '')
+        
+        return {
+            'text': text_response,
+            'raw': response_data
+        }
+
+
+# Example usage
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    
+    load_dotenv()
+    
+    client = CortexAgentClient(
+        agent_endpoint=os.getenv('AGENT_ENDPOINT'),
+        pat=os.getenv('SNOWFLAKE_PAT')
+    )
+    
+    # Send a query
+    response = client.chat("What is my account balance?")
+    print(response['text'])
+```
+
+### Streaming Client (SSE)
+
+For real-time responses:
+
+**File**: `app/cortex_streaming_client.py`
+
+```python
+#!/usr/bin/env python3
+"""
+Streaming client for Cortex Agent (Server-Sent Events)
+"""
+
+import requests
+import json
+import re
+from typing import Callable, Optional, Dict, List
+
+class CortexStreamingClient:
+    """Streaming client for real-time agent responses"""
+    
+    def __init__(self, agent_endpoint: str, pat: str):
+        self.endpoint = agent_endpoint
+        self.headers = {
+            "Authorization": f"Bearer {pat}",
+            "Content-Type": "application/json",
+            "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN",
+            "Accept": "text/event-stream"  # Request SSE format
+        }
+    
+    def chat_stream(
+        self, 
+        message: str,
+        on_status: Optional[Callable[[str], None]] = None,
+        on_content: Optional[Callable[[str], None]] = None,
+        on_complete: Optional[Callable[[Dict], None]] = None
+    ):
+        """
+        Send message and receive streaming response
+        
+        Args:
+            message: User message
+            on_status: Callback for status updates
+            on_content: Callback for content chunks
+            on_complete: Callback when response is complete
+        """
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": message}]
+                }
+            ],
+            "stream": True  # Enable streaming
+        }
+        
+        response = requests.post(
+            self.endpoint,
+            headers=self.headers,
+            json=payload,
+            stream=True,
+            timeout=120
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API Error {response.status_code}: {response.text}")
+        
+        # Process SSE stream
+        full_response = ""
+        
+        for line in response.iter_lines():
+            if not line:
+                continue
+            
+            line = line.decode('utf-8')
+            
+            # Parse SSE format: "data: {...}"
+            if line.startswith('data: '):
+                data_str = line[6:]  # Remove "data: " prefix
+                
+                if data_str == '[DONE]':
+                    break
+                
+                try:
+                    data = json.loads(data_str)
+                    event_type = data.get('event')
+                    
+                    if event_type == 'response.status':
+                        # Status update
+                        status_msg = data.get('message', '')
+                        if on_status:
+                            on_status(status_msg)
+                    
+                    elif event_type == 'response.content.delta':
+                        # Content chunk
+                        delta = data.get('delta', {})
+                        text = delta.get('text', '')
+                        if text and on_content:
+                            on_content(text)
+                            full_response += text
+                    
+                    elif event_type == 'response.done':
+                        # Response complete
+                        if on_complete:
+                            on_complete(data)
+                
+                except json.JSONDecodeError:
+                    continue
+        
+        return full_response
+
+
+# Example usage
+if __name__ == "__main__":
+    import os
+    from dotenv import load_dotenv
+    
+    load_dotenv()
+    
+    client = CortexStreamingClient(
+        agent_endpoint=os.getenv('AGENT_ENDPOINT'),
+        pat=os.getenv('SNOWFLAKE_PAT')
+    )
+    
+    def on_status(msg):
+        print(f"⚙️  {msg}")
+    
+    def on_content(text):
+        print(text, end='', flush=True)
+    
+    def on_complete(data):
+        print("\n✅ Complete")
+    
+    print("Query: What is my balance?")
+    response = client.chat_stream(
+        "What is my balance?",
+        on_status=on_status,
+        on_content=on_content,
+        on_complete=on_complete
+    )
+```
+
+## Managing Conversation History
+
+To maintain context across multiple turns:
+
+```python
+class ConversationManager:
+    """Manage multi-turn conversations"""
+    
+    def __init__(self, client: CortexAgentClient):
+        self.client = client
+        self.history = []
+    
+    def send_message(self, message: str) -> str:
+        """Send message with conversation history"""
+        response = self.client.chat(message, conversation_history=self.history)
+        
+        # Add to history
+        self.history.append({
+            "role": "user",
+            "content": [{"type": "text", "text": message}]
+        })
+        
+        self.history.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": response['text']}]
+        })
+        
+        return response['text']
+    
+    def clear_history(self):
+        """Clear conversation history"""
+        self.history = []
+    
+    def get_history(self):
+        """Get current conversation history"""
+        return self.history
+
+
+# Usage
+manager = ConversationManager(client)
+
+response1 = manager.send_message("What is my balance?")
+print(response1)
+
+response2 = manager.send_message("And what about my recent transactions?")
+print(response2)  # Agent has context from previous message
+```
+
+## Error Handling
+
+```python
+class CortexAgentError(Exception):
+    """Base exception for Cortex Agent errors"""
+    pass
+
+class CortexAgentClient:
+    
+    def chat(self, message: str) -> Dict:
+        try:
+            response = requests.post(
+                self.endpoint,
+                headers=self.headers,
+                json={"messages": [...]},
+                timeout=60
+            )
+            
+            # Handle HTTP errors
+            if response.status_code == 401:
+                raise CortexAgentError("Authentication failed - check PAT")
+            elif response.status_code == 404:
+                raise CortexAgentError("Agent not found - check endpoint")
+            elif response.status_code == 429:
+                raise CortexAgentError("Rate limit exceeded - try again later")
+            elif response.status_code >= 500:
+                raise CortexAgentError("Server error - try again later")
+            elif response.status_code != 200:
+                raise CortexAgentError(f"API Error {response.status_code}: {response.text}")
+            
+            return self._parse_response(response.json())
+            
+        except requests.Timeout:
+            raise CortexAgentError("Request timeout - query took too long")
+        except requests.ConnectionError:
+            raise CortexAgentError("Connection failed - check network")
+        except Exception as e:
+            raise CortexAgentError(f"Unexpected error: {str(e)}")
+```
+
+## Environment Configuration
+
+**File**: `.env`
+
+```bash
+# Snowflake Configuration
+SNOWFLAKE_ACCOUNT=your-account.snowflakecomputing.com
+SNOWFLAKE_HOST=your-account.snowflakecomputing.com
+SNOWFLAKE_PAT=your_personal_access_token
+
+# Agent Configuration
+AGENT_ENDPOINT=https://your-account.snowflakecomputing.com/api/v2/databases/SNOWFLAKE_INTELLIGENCE/schemas/AGENTIC/agents/MY_APP_AGENT:run
+
+# Application Configuration
+APP_PORT=5000
+DEBUG=True
+```
+
+**File**: `app/config.py`
+
+```python
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class Config:
+    """Application configuration"""
+    
+    # Snowflake
+    SNOWFLAKE_ACCOUNT = os.getenv('SNOWFLAKE_ACCOUNT')
+    SNOWFLAKE_HOST = os.getenv('SNOWFLAKE_HOST')
+    SNOWFLAKE_PAT = os.getenv('SNOWFLAKE_PAT')
+    
+    # Agent
+    AGENT_ENDPOINT = os.getenv('AGENT_ENDPOINT')
+    
+    # Application
+    APP_PORT = int(os.getenv('APP_PORT', 5000))
+    DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
+    
+    @classmethod
+    def validate(cls):
+        """Validate required config"""
+        required = ['SNOWFLAKE_HOST', 'SNOWFLAKE_PAT', 'AGENT_ENDPOINT']
+        missing = [key for key in required if not getattr(cls, key)]
+        
+        if missing:
+            raise ValueError(f"Missing required config: {', '.join(missing)}")
+```
+
+## Flask Integration Example
+
+**File**: `app/main.py`
+
+```python
+#!/usr/bin/env python3
+from flask import Flask, request, jsonify
+from cortex_client import CortexAgentClient
+from config import Config
+
+# Validate config
+Config.validate()
+
+# Initialize Flask
+app = Flask(__name__)
+
+# Initialize Cortex client
+cortex_client = CortexAgentClient(
+    agent_endpoint=Config.AGENT_ENDPOINT,
+    pat=Config.SNOWFLAKE_PAT
+)
+
+@app.route('/chat', methods=['POST'])
+def chat():
+    """Chat endpoint"""
+    try:
+        data = request.json
+        message = data.get('message')
+        
+        if not message:
+            return jsonify({'error': 'Message required'}), 400
+        
+        # Send to agent
+        response = cortex_client.chat(message)
+        
+        return jsonify({
+            'response': response['text'],
+            'status': 'success'
+        })
+    
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'status': 'error'
+        }), 500
+
+@app.route('/health', methods=['GET'])
+def health():
+    """Health check endpoint"""
+    return jsonify({'status': 'healthy'})
+
+if __name__ == '__main__':
+    app.run(
+        host='0.0.0.0',
+        port=Config.APP_PORT,
+        debug=Config.DEBUG
+    )
+```
+
+**Run**:
+```bash
+python app/main.py
+```
+
+**Test**:
+```bash
+curl -X POST http://localhost:5000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is my balance?"}'
+```
+
+## Rate Limiting
+
+Implement rate limiting to avoid overwhelming the API:
+
+```python
+from functools import wraps
+import time
+
+class RateLimiter:
+    """Simple rate limiter"""
+    
+    def __init__(self, max_calls: int, period: int):
+        self.max_calls = max_calls
+        self.period = period
+        self.calls = []
+    
+    def __call__(self, func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            
+            # Remove old calls
+            self.calls = [c for c in self.calls if c > now - self.period]
+            
+            # Check limit
+            if len(self.calls) >= self.max_calls:
+                raise Exception(f"Rate limit exceeded: {self.max_calls} calls per {self.period}s")
+            
+            # Record call
+            self.calls.append(now)
+            
+            return func(*args, **kwargs)
+        
+        return wrapper
+
+# Usage
+class CortexAgentClient:
+    
+    @RateLimiter(max_calls=10, period=60)  # 10 calls per minute
+    def chat(self, message: str) -> Dict:
+        # ... implementation
+        pass
+```
+
+## Testing
+
+**File**: `tests/test_integration.py`
+
+```python
+#!/usr/bin/env python3
+import unittest
+from app.cortex_client import CortexAgentClient
+from app.config import Config
+
+class TestCortexIntegration(unittest.TestCase):
+    
+    @classmethod
+    def setUpClass(cls):
+        Config.validate()
+        cls.client = CortexAgentClient(
+            agent_endpoint=Config.AGENT_ENDPOINT,
+            pat=Config.SNOWFLAKE_PAT
+        )
+    
+    def test_simple_query(self):
+        """Test simple data query"""
+        response = self.client.chat("What is my balance?")
+        self.assertIsNotNone(response['text'])
+        self.assertGreater(len(response['text']), 0)
+    
+    def test_knowledge_query(self):
+        """Test knowledge base search"""
+        response = self.client.chat("What is the refund policy?")
+        self.assertIsNotNone(response['text'])
+    
+    def test_invalid_endpoint(self):
+        """Test error handling for invalid endpoint"""
+        bad_client = CortexAgentClient(
+            agent_endpoint="https://invalid.snowflakecomputing.com/api/v2/...",
+            pat="invalid_token"
+        )
+        
+        with self.assertRaises(Exception):
+            bad_client.chat("test")
+
+if __name__ == '__main__':
+    unittest.main()
+```
+
+## Best Practices
+
+1. **Always use HTTPS** - Never send PAT over HTTP
+2. **Set appropriate timeouts** - Don't wait forever (60s recommended)
+3. **Implement retry logic** - Handle transient failures
+4. **Cache responses** - For repeated queries
+5. **Log API calls** - For debugging and monitoring
+6. **Rotate PATs regularly** - Security best practice
+7. **Handle rate limits gracefully** - Implement backoff
+
+## Common Issues
+
+### Issue: 401 Unauthorized
+
+**Cause**: Invalid or expired PAT
+
+**Solution**: 
+- Generate new PAT in Snowsight
+- Update `.env` file
+- Verify PAT hasn't expired
+
+### Issue: 404 Not Found
+
+**Cause**: Incorrect agent endpoint
+
+**Solution**:
+```python
+# Verify endpoint format
+AGENT_ENDPOINT=https://{account}.snowflakecomputing.com/api/v2/databases/SNOWFLAKE_INTELLIGENCE/schemas/AGENTIC/agents/{AGENT_NAME}:run
+```
+
+### Issue: Timeout errors
+
+**Cause**: Query takes too long
+
+**Solutions**:
+- Increase timeout (requests parameter)
+- Use streaming API for long operations
+- Optimize agent instructions
+- Check warehouse size
+
+## Next Steps
+
+After integration:
+1. Implement comprehensive testing (see `08-testing-strategy.mdc`)
+2. Add monitoring and logging
+3. Implement caching for performance
+4. Set up error alerting
+5. Plan for production deployment

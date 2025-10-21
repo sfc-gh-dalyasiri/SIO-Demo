@@ -1,0 +1,741 @@
+# Testing Strategy for Cortex AI Projects
+
+Comprehensive testing ensures your Cortex Agent works correctly before production deployment.
+
+## Testing Layers
+
+```
+1. Infrastructure Tests (SQL)
+   ├─ Database and schemas exist
+   ├─ Tables have data
+   ├─ Functions/procedures work
+   └─ Search services are active
+
+2. Component Tests (Python)
+   ├─ Semantic model queries
+   ├─ Search service results
+   ├─ Custom functions
+   └─ API client functionality
+
+3. Integration Tests (Python)
+   ├─ Agent responses
+   ├─ Tool selection
+   ├─ Multi-turn conversations
+   └─ End-to-end flows
+
+4. Edge Case Tests
+   ├─ Invalid inputs
+   ├─ Empty results
+   ├─ Timeout scenarios
+   └─ Error handling
+```
+
+## Infrastructure Tests (SQL)
+
+**File**: `tests/test_infrastructure.sql`
+
+```sql
+-- ============================================================================
+-- Infrastructure Tests
+-- ============================================================================
+
+USE ROLE ACCOUNTADMIN;
+USE WAREHOUSE MY_WAREHOUSE;
+
+SELECT '=== INFRASTRUCTURE TESTS ===' AS TEST_SECTION;
+
+-- Test 1: Database exists
+SELECT 'Test 1: Database exists' AS TEST;
+SHOW DATABASES LIKE 'MY_APP_DB';
+
+-- Test 2: Schemas exist
+SELECT 'Test 2: Schemas exist' AS TEST;
+SHOW SCHEMAS IN DATABASE MY_APP_DB;
+
+-- Test 3: Tables exist and have data
+SELECT 'Test 3: Tables have data' AS TEST;
+SELECT 
+    'CUSTOMERS' AS TABLE_NAME,
+    COUNT(*) AS ROW_COUNT 
+FROM MY_APP_DB.DATA.CUSTOMERS;
+
+SELECT 
+    'TRANSACTIONS' AS TABLE_NAME,
+    COUNT(*) AS ROW_COUNT 
+FROM MY_APP_DB.DATA.TRANSACTIONS;
+
+-- Test 4: Warehouse is active
+SELECT 'Test 4: Warehouse is active' AS TEST;
+SHOW WAREHOUSES LIKE 'MY_WAREHOUSE';
+
+-- Test 5: Semantic model uploaded
+SELECT 'Test 5: Semantic model exists' AS TEST;
+LS @MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE/semantic_model.yaml;
+
+-- Test 6: Cortex Search service exists
+SELECT 'Test 6: Search service exists' AS TEST;
+SHOW CORTEX SEARCH SERVICES IN SCHEMA MY_APP_DB.KNOWLEDGE_BASE;
+
+-- Test 7: Functions exist
+SELECT 'Test 7: Custom functions exist' AS TEST;
+SHOW FUNCTIONS IN SCHEMA MY_APP_DB.OPERATIONS;
+
+-- Test 8: Agent exists
+SELECT 'Test 8: Agent exists' AS TEST;
+USE DATABASE SNOWFLAKE_INTELLIGENCE;
+USE SCHEMA AGENTIC;
+SHOW AGENTS LIKE 'MY_APP_AGENT';
+
+SELECT '=== ALL INFRASTRUCTURE TESTS COMPLETE ===' AS TEST_SECTION;
+```
+
+**Run**:
+```bash
+snow sql -f tests/test_infrastructure.sql
+```
+
+## Component Tests
+
+### Test Semantic Model (Cortex Analyst)
+
+**File**: `tests/test_semantic_model.py`
+
+```python
+#!/usr/bin/env python3
+"""Test semantic model queries"""
+
+import snowflake.connector
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def get_connection():
+    return snowflake.connector.connect(
+        account=os.getenv('SNOWFLAKE_ACCOUNT'),
+        user=os.getenv('SNOWFLAKE_USER'),
+        password=os.getenv('SNOWFLAKE_PASSWORD'),
+        warehouse='MY_WAREHOUSE'
+    )
+
+def test_semantic_model():
+    """Test basic semantic model queries"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    tests = [
+        ("Customer count", "SELECT COUNT(*) FROM MY_APP_DB.DATA.CUSTOMERS"),
+        ("Transaction sum", "SELECT SUM(AMOUNT) FROM MY_APP_DB.DATA.TRANSACTIONS"),
+        ("Recent transactions", "SELECT * FROM MY_APP_DB.DATA.TRANSACTIONS LIMIT 5")
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test_name, query in tests:
+        try:
+            cursor.execute(query)
+            results = cursor.fetchall()
+            print(f"✅ {test_name}: {len(results)} rows")
+            passed += 1
+        except Exception as e:
+            print(f"❌ {test_name}: {str(e)}")
+            failed += 1
+    
+    cursor.close()
+    conn.close()
+    
+    print(f"\n📊 Results: {passed} passed, {failed} failed")
+    return failed == 0
+
+if __name__ == "__main__":
+    success = test_semantic_model()
+    exit(0 if success else 1)
+```
+
+### Test Search Service
+
+**File**: `tests/test_search.py`
+
+```python
+#!/usr/bin/env python3
+"""Test Cortex Search functionality"""
+
+import snowflake.connector
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def test_search():
+    """Test search service"""
+    conn = snowflake.connector.connect(
+        account=os.getenv('SNOWFLAKE_ACCOUNT'),
+        user=os.getenv('SNOWFLAKE_USER'),
+        password=os.getenv('SNOWFLAKE_PASSWORD'),
+        warehouse='MY_WAREHOUSE'
+    )
+    
+    cursor = conn.cursor()
+    
+    test_queries = [
+        "refund policy",
+        "password reset",
+        "contact support"
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for query in test_queries:
+        try:
+            cursor.execute(f"""
+                SELECT DOCUMENT_ID, TITLE
+                FROM TABLE(
+                    MY_APP_DB.KNOWLEDGE_BASE.MY_SEARCH_SERVICE('{query}', 3)
+                )
+            """)
+            
+            results = cursor.fetchall()
+            
+            if results:
+                print(f"✅ Query '{query}': {len(results)} results")
+                for row in results:
+                    print(f"   - {row[1]}")
+                passed += 1
+            else:
+                print(f"⚠️  Query '{query}': No results")
+                failed += 1
+                
+        except Exception as e:
+            print(f"❌ Query '{query}': {str(e)}")
+            failed += 1
+    
+    cursor.close()
+    conn.close()
+    
+    print(f"\n📊 Results: {passed} passed, {failed} failed")
+    return failed == 0
+
+if __name__ == "__main__":
+    success = test_search()
+    exit(0 if success else 1)
+```
+
+### Test Custom Functions
+
+**File**: `tests/test_custom_functions.sql`
+
+```sql
+-- Test custom functions directly
+USE DATABASE MY_APP_DB;
+USE SCHEMA OPERATIONS;
+USE WAREHOUSE MY_WAREHOUSE;
+
+SELECT '=== CUSTOM FUNCTION TESTS ===' AS TEST_SECTION;
+
+-- Test 1: Calculate fee function
+SELECT 'Test 1: Calculate fee' AS TEST;
+SELECT CALCULATE_FEE(1000, 'USD');
+
+-- Test 2: Transfer money procedure
+SELECT 'Test 2: Transfer money' AS TEST;
+CALL TRANSFER_MONEY(50, 'ACC001', 'ACC002');
+
+-- Verify transfer created transaction
+SELECT 'Verify transaction created' AS TEST;
+SELECT * FROM MY_APP_DB.DATA.TRANSACTIONS 
+ORDER BY TRANSACTION_DATE DESC 
+LIMIT 1;
+
+SELECT '=== CUSTOM FUNCTION TESTS COMPLETE ===' AS TEST_SECTION;
+```
+
+## Integration Tests
+
+**File**: `tests/test_agent_integration.py`
+
+```python
+#!/usr/bin/env python3
+"""Integration tests for Cortex Agent"""
+
+import requests
+import os
+import json
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class AgentTester:
+    """Test harness for Cortex Agent"""
+    
+    def __init__(self):
+        self.host = os.getenv('SNOWFLAKE_HOST')
+        self.pat = os.getenv('SNOWFLAKE_PAT')
+        self.endpoint = os.getenv('AGENT_ENDPOINT')
+        
+        self.headers = {
+            "Authorization": f"Bearer {self.pat}",
+            "Content-Type": "application/json",
+            "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+        }
+        
+        self.passed = 0
+        self.failed = 0
+    
+    def test_query(self, name: str, query: str, expected_keywords: list = None):
+        """Test a single query"""
+        print(f"\n🧪 Test: {name}")
+        print(f"   Query: {query}")
+        
+        try:
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": query}]
+                    }
+                ]
+            }
+            
+            response = requests.post(
+                self.endpoint,
+                headers=self.headers,
+                json=payload,
+                timeout=60
+            )
+            
+            if response.status_code != 200:
+                print(f"   ❌ Failed: HTTP {response.status_code}")
+                print(f"   {response.text}")
+                self.failed += 1
+                return False
+            
+            data = response.json()
+            message = data.get('message', {})
+            content = message.get('content', [])
+            
+            text_response = ""
+            for item in content:
+                if item.get('type') == 'text':
+                    text_response += item.get('text', '')
+            
+            if not text_response:
+                print(f"   ❌ Failed: Empty response")
+                self.failed += 1
+                return False
+            
+            # Check for expected keywords
+            if expected_keywords:
+                missing = [kw for kw in expected_keywords if kw.lower() not in text_response.lower()]
+                if missing:
+                    print(f"   ⚠️  Warning: Missing keywords: {missing}")
+            
+            print(f"   ✅ Passed")
+            print(f"   Response: {text_response[:100]}...")
+            self.passed += 1
+            return True
+            
+        except Exception as e:
+            print(f"   ❌ Failed: {str(e)}")
+            self.failed += 1
+            return False
+    
+    def run_tests(self):
+        """Run all integration tests"""
+        print("=" * 80)
+        print("CORTEX AGENT INTEGRATION TESTS")
+        print("=" * 80)
+        
+        # Test 1: Simple data query
+        self.test_query(
+            "Simple Balance Query",
+            "What is my account balance?",
+            expected_keywords=["balance", "AED"]
+        )
+        
+        # Test 2: Transaction history
+        self.test_query(
+            "Transaction History",
+            "Show me my recent transactions",
+            expected_keywords=["transaction"]
+        )
+        
+        # Test 3: Knowledge base search
+        self.test_query(
+            "Knowledge Base Query",
+            "What is the refund policy?",
+            expected_keywords=["refund", "policy"]
+        )
+        
+        # Test 4: Complex analytical query
+        self.test_query(
+            "Analytical Query",
+            "What is the total transaction volume this month?",
+            expected_keywords=["total", "volume"]
+        )
+        
+        # Test 5: Custom function (transfer)
+        self.test_query(
+            "Transfer Request",
+            "Transfer 10 AED from ACC001 to ACC002",
+            expected_keywords=["transfer", "confirm"]
+        )
+        
+        # Print summary
+        print("\n" + "=" * 80)
+        print(f"📊 RESULTS: {self.passed} passed, {self.failed} failed")
+        print("=" * 80)
+        
+        return self.failed == 0
+
+if __name__ == "__main__":
+    tester = AgentTester()
+    success = tester.run_tests()
+    exit(0 if success else 1)
+```
+
+**Run**:
+```bash
+python tests/test_agent_integration.py
+```
+
+## Multi-Turn Conversation Tests
+
+**File**: `tests/test_conversations.py`
+
+```python
+#!/usr/bin/env python3
+"""Test multi-turn conversations"""
+
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+class ConversationTester:
+    def __init__(self):
+        self.endpoint = os.getenv('AGENT_ENDPOINT')
+        self.headers = {
+            "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+            "Content-Type": "application/json",
+            "X-Snowflake-Authorization-Token-Type": "PROGRAMMATIC_ACCESS_TOKEN"
+        }
+        self.history = []
+    
+    def send_message(self, message: str) -> str:
+        """Send message with conversation history"""
+        self.history.append({
+            "role": "user",
+            "content": [{"type": "text", "text": message}]
+        })
+        
+        payload = {"messages": self.history}
+        
+        response = requests.post(
+            self.endpoint,
+            headers=self.headers,
+            json=payload,
+            timeout=60
+        )
+        
+        if response.status_code != 200:
+            raise Exception(f"API Error: {response.status_code}")
+        
+        data = response.json()
+        content = data['message']['content']
+        
+        text = ""
+        for item in content:
+            if item['type'] == 'text':
+                text += item['text']
+        
+        # Add to history
+        self.history.append({
+            "role": "assistant",
+            "content": [{"type": "text", "text": text}]
+        })
+        
+        return text
+    
+    def test_conversation(self):
+        """Test a multi-turn conversation"""
+        print("Testing Multi-Turn Conversation")
+        print("=" * 80)
+        
+        # Turn 1
+        print("\n👤 User: What is my account balance?")
+        response1 = self.send_message("What is my account balance?")
+        print(f"🤖 Agent: {response1[:200]}...")
+        
+        # Turn 2 (should remember context)
+        print("\n👤 User: And what about my recent transactions?")
+        response2 = self.send_message("And what about my recent transactions?")
+        print(f"🤖 Agent: {response2[:200]}...")
+        
+        # Turn 3 (follow-up question)
+        print("\n👤 User: Can you explain the last one?")
+        response3 = self.send_message("Can you explain the last one?")
+        print(f"🤖 Agent: {response3[:200]}...")
+        
+        print("\n✅ Conversation test complete")
+
+if __name__ == "__main__":
+    tester = ConversationTester()
+    tester.test_conversation()
+```
+
+## Edge Case Tests
+
+**File**: `tests/test_edge_cases.py`
+
+```python
+#!/usr/bin/env python3
+"""Test edge cases and error handling"""
+
+import requests
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def test_edge_cases():
+    """Test various edge cases"""
+    
+    endpoint = os.getenv('AGENT_ENDPOINT')
+    headers = {
+        "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+        "Content-Type": "application/json"
+    }
+    
+    edge_cases = [
+        ("Empty query", ""),
+        ("Very long query", "What is " * 100 + "my balance?"),
+        ("Special characters", "What's my balance? $$$"),
+        ("Non-English", "¿Cuál es mi saldo?"),
+        ("Nonsense query", "asdfghjkl qwertyuiop"),
+        ("SQL injection attempt", "'; DROP TABLE CUSTOMERS; --"),
+        ("Invalid account", "Show balance for account INVALID123")
+    ]
+    
+    passed = 0
+    failed = 0
+    
+    for test_name, query in edge_cases:
+        print(f"\n🧪 Test: {test_name}")
+        
+        try:
+            if not query:
+                # Test empty query handling at client level
+                print("   ⚠️  Skipping empty query (handled by client)")
+                continue
+            
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": query}]
+                    }
+                ]
+            }
+            
+            response = requests.post(endpoint, headers=headers, json=payload, timeout=30)
+            
+            if response.status_code == 200:
+                data = response.json()
+                print(f"   ✅ Handled gracefully")
+                passed += 1
+            else:
+                print(f"   ⚠️  HTTP {response.status_code}")
+                passed += 1  # Still counts as passing if error is handled
+                
+        except Exception as e:
+            print(f"   ❌ Exception: {str(e)}")
+            failed += 1
+    
+    print(f"\n📊 Results: {passed} passed, {failed} failed")
+
+if __name__ == "__main__":
+    test_edge_cases()
+```
+
+## Test Execution Order
+
+```bash
+# 1. Infrastructure tests (must pass first)
+snow sql -f tests/test_infrastructure.sql
+
+# 2. Component tests
+python tests/test_semantic_model.py
+python tests/test_search.py
+snow sql -f tests/test_custom_functions.sql
+
+# 3. Integration tests
+python tests/test_agent_integration.py
+
+# 4. Conversation tests
+python tests/test_conversations.py
+
+# 5. Edge case tests
+python tests/test_edge_cases.py
+```
+
+## Automated Test Suite
+
+**File**: `tests/run_all_tests.sh`
+
+```bash
+#!/bin/bash
+
+echo "================================"
+echo "RUNNING COMPLETE TEST SUITE"
+echo "================================"
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+NC='\033[0m' # No Color
+
+FAILED=0
+
+# Infrastructure tests
+echo -e "\n${GREEN}[1/5] Infrastructure Tests${NC}"
+if snow sql -f tests/test_infrastructure.sql; then
+    echo "✅ Infrastructure tests passed"
+else
+    echo -e "${RED}❌ Infrastructure tests failed${NC}"
+    FAILED=$((FAILED+1))
+fi
+
+# Semantic model tests
+echo -e "\n${GREEN}[2/5] Semantic Model Tests${NC}"
+if python tests/test_semantic_model.py; then
+    echo "✅ Semantic model tests passed"
+else
+    echo -e "${RED}❌ Semantic model tests failed${NC}"
+    FAILED=$((FAILED+1))
+fi
+
+# Search tests
+echo -e "\n${GREEN}[3/5] Search Tests${NC}"
+if python tests/test_search.py; then
+    echo "✅ Search tests passed"
+else
+    echo -e "${RED}❌ Search tests failed${NC}"
+    FAILED=$((FAILED+1))
+fi
+
+# Integration tests
+echo -e "\n${GREEN}[4/5] Integration Tests${NC}"
+if python tests/test_agent_integration.py; then
+    echo "✅ Integration tests passed"
+else
+    echo -e "${RED}❌ Integration tests failed${NC}"
+    FAILED=$((FAILED+1))
+fi
+
+# Edge case tests
+echo -e "\n${GREEN}[5/5] Edge Case Tests${NC}"
+if python tests/test_edge_cases.py; then
+    echo "✅ Edge case tests passed"
+else
+    echo -e "${RED}❌ Edge case tests failed${NC}"
+    FAILED=$((FAILED+1))
+fi
+
+# Summary
+echo -e "\n================================"
+if [ $FAILED -eq 0 ]; then
+    echo -e "${GREEN}✅ ALL TESTS PASSED${NC}"
+    exit 0
+else
+    echo -e "${RED}❌ $FAILED TEST SUITE(S) FAILED${NC}"
+    exit 1
+fi
+```
+
+**Make executable and run**:
+```bash
+chmod +x tests/run_all_tests.sh
+./tests/run_all_tests.sh
+```
+
+## Performance Testing
+
+**File**: `tests/test_performance.py`
+
+```python
+#!/usr/bin/env python3
+"""Test agent performance"""
+
+import requests
+import os
+import time
+from dotenv import load_dotenv
+
+load_dotenv()
+
+def test_performance():
+    """Test response times"""
+    
+    endpoint = os.getenv('AGENT_ENDPOINT')
+    headers = {
+        "Authorization": f"Bearer {os.getenv('SNOWFLAKE_PAT')}",
+        "Content-Type": "application/json"
+    }
+    
+    queries = [
+        "What is my balance?",
+        "Show recent transactions",
+        "What is the refund policy?",
+        "Calculate total volume"
+    ]
+    
+    print("Performance Tests")
+    print("=" * 80)
+    
+    for query in queries:
+        start = time.time()
+        
+        payload = {
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": query}]
+                }
+            ]
+        }
+        
+        response = requests.post(endpoint, headers=headers, json=payload)
+        
+        duration = time.time() - start
+        
+        if response.status_code == 200:
+            print(f"✅ '{query}': {duration:.2f}s")
+        else:
+            print(f"❌ '{query}': Failed")
+    
+    print("=" * 80)
+
+if __name__ == "__main__":
+    test_performance()
+```
+
+## Best Practices
+
+1. **Test in order**: Infrastructure → Components → Integration
+2. **Automate testing**: Use scripts to run full test suite
+3. **Test early and often**: After every significant change
+4. **Document test results**: Keep records of test runs
+5. **Test edge cases**: Don't just test happy paths
+6. **Monitor performance**: Track response times
+7. **Test with real data**: Use production-like datasets
+
+## Next Steps
+
+After testing:
+1. Fix any failures before deployment
+2. Document known issues
+3. Set up CI/CD for automated testing
+4. Plan for production monitoring

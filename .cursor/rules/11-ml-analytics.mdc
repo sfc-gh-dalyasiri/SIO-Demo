@@ -1,0 +1,199 @@
+# ML Analytics with Snowflake Python UDFs
+
+## Overview
+
+This guide covers building ML-powered analytics using Python UDFs in Snowflake, specifically for the payroll anomaly detection use case.
+
+## References
+
+### Official Snowflake Documentation
+- [Python UDFs](https://docs.snowflake.com/en/developer-guide/udf/python/udf-python)
+- [Python UDF Table Functions](https://docs.snowflake.com/en/developer-guide/udf/python/udf-python-tabular-functions)
+- [Snowpark Python API](https://docs.snowflake.com/en/developer-guide/snowpark/python/index)
+- [Available Python Packages](https://repo.anaconda.com/pkgs/snowflake/)
+- [Python Stored Procedures](https://docs.snowflake.com/en/developer-guide/stored-procedure/stored-procedures-python)
+
+### ML Libraries Available in Snowflake
+- scikit-learn (Isolation Forest, clustering, regression)
+- pandas, numpy (data manipulation)
+- xgboost (gradient boosting)
+- statsmodels (statistical models)
+
+### Streamlit Integration
+- [Streamlit in Snowflake](https://docs.snowflake.com/en/developer-guide/streamlit/about-streamlit)
+- [Streamlit st.connection](https://docs.streamlit.io/develop/api-reference/connections/st.connection)
+- [Streamlit Secrets Management](https://docs.streamlit.io/develop/concepts/connections/secrets-management)
+- [Streamlit Git Integration](https://docs.snowflake.com/en/developer-guide/streamlit/create-streamlit-git)
+- [Streamlit Best Practices](https://blog.streamlit.io/best-practices-for-building-genai-apps-with-streamlit/)
+
+### Local Development
+- Use `.streamlit/secrets.toml` for local Snowflake credentials
+- Use `st.connection("snowflake")` for connection management
+- PAT tokens go in `password` field (not authenticator)
+- Test locally before git deployment: `streamlit run app.py`
+
+## ML Anomaly Detection Pattern
+
+### Use Case: Payroll Anomaly Detection
+
+**Business Problem**: Detect unusual payroll patterns that might indicate:
+- Data entry errors
+- Fraudulent payments
+- System glitches
+- Policy violations
+
+**ML Approach**: Isolation Forest (unsupervised anomaly detection)
+
+**Why Isolation Forest**:
+- Works without labeled data (no need for "known anomalies")
+- Handles multiple features (salary, overtime, deductions)
+- Fast training and inference
+- Interpretable anomaly scores
+
+## Implementation
+
+### Schema Setup
+
+Create dedicated schema for ML functions:
+```sql
+USE DATABASE HR_DEMO_DATA;
+CREATE SCHEMA IF NOT EXISTS ML_ANALYTICS
+    COMMENT = 'Machine learning models and analytics functions';
+```
+
+### Example: Payroll Anomaly Detector UDF
+
+**Returns anomaly scores for employee payroll history**
+
+```sql
+CREATE OR REPLACE FUNCTION HR_DEMO_DATA.ML_ANALYTICS.DETECT_PAYROLL_ANOMALIES(
+    EMPLOYEE_ID_INPUT NUMBER,
+    MONTHS_BACK NUMBER
+)
+RETURNS TABLE (
+    PAY_PERIOD DATE,
+    GROSS_PAY FLOAT,
+    ANOMALY_SCORE FLOAT,
+    IS_ANOMALY BOOLEAN,
+    RISK_LEVEL VARCHAR,
+    EXPLANATION VARCHAR
+)
+LANGUAGE PYTHON
+RUNTIME_VERSION = '3.11'
+PACKAGES = ('scikit-learn', 'pandas', 'numpy')
+HANDLER = 'detect_anomalies'
+COMMENT = 'ML-based payroll anomaly detection using Isolation Forest'
+AS
+$$
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import IsolationForest
+
+def detect_anomalies(session, employee_id_input, months_back):
+    """
+    Detect payroll anomalies using Isolation Forest
+    
+    Returns: Table with anomaly scores and risk levels
+    """
+    
+    # Fetch payroll data for employee
+    query = f"""
+        SELECT 
+            PAY_PERIOD,
+            GROSS_PAY,
+            OVERTIME_PAY,
+            BONUS,
+            TOTAL_DEDUCTIONS,
+            BASE_SALARY
+        FROM HR_DEMO_DATA.HR_DATA.PAYROLL_RECORDS
+        WHERE EMPLOYEE_ID = {employee_id_input}
+        AND PAY_PERIOD >= DATEADD(month, -{months_back}, CURRENT_DATE())
+        ORDER BY PAY_PERIOD
+    """
+    
+    df = session.sql(query).to_pandas()
+    
+    if len(df) == 0:
+        return pd.DataFrame(columns=['PAY_PERIOD', 'GROSS_PAY', 'ANOMALY_SCORE', 
+                                     'IS_ANOMALY', 'RISK_LEVEL', 'EXPLANATION'])
+    
+    # Prepare features for ML
+    features = df[['GROSS_PAY', 'OVERTIME_PAY', 'BONUS', 'TOTAL_DEDUCTIONS']].fillna(0)
+    
+    # Train Isolation Forest
+    model = IsolationForest(
+        contamination=0.1,  # Expect 10% anomalies
+        random_state=42,
+        n_estimators=100
+    )
+    
+    # Predict anomalies (-1 = anomaly, 1 = normal)
+    predictions = model.fit_predict(features)
+    
+    # Get anomaly scores (lower = more anomalous)
+    scores = model.score_samples(features)
+    
+    # Normalize scores to 0-100 (100 = most anomalous)
+    min_score, max_score = scores.min(), scores.max()
+    normalized_scores = 100 * (max_score - scores) / (max_score - min_score) if max_score != min_score else [0] * len(scores)
+    
+    # Add results to dataframe
+    df['ANOMALY_SCORE'] = normalized_scores
+    df['IS_ANOMALY'] = predictions == -1
+    
+    # Determine risk level
+    df['RISK_LEVEL'] = df['ANOMALY_SCORE'].apply(lambda x: 
+        'HIGH' if x > 70 else 'MEDIUM' if x > 40 else 'LOW'
+    )
+    
+    # Generate explanations
+    def explain_anomaly(row):
+        explanations = []
+        
+        avg_gross = df['GROSS_PAY'].mean()
+        if row['GROSS_PAY'] > avg_gross * 1.5:
+            explanations.append(f"Salary {((row['GROSS_PAY']/avg_gross - 1) * 100):.0f}% above average")
+        elif row['GROSS_PAY'] < avg_gross * 0.7:
+            explanations.append(f"Salary {((1 - row['GROSS_PAY']/avg_gross) * 100):.0f}% below average")
+        
+        if row['OVERTIME_PAY'] > df['OVERTIME_PAY'].mean() * 2:
+            explanations.append("Unusually high overtime")
+        
+        if row['BONUS'] > 0 and df['BONUS'].mean() == 0:
+            explanations.append(f"Unexpected bonus of ${row['BONUS']:.0f}")
+        
+        return '; '.join(explanations) if explanations else 'Within normal patterns'
+    
+    df['EXPLANATION'] = df.apply(explain_anomaly, axis=1)
+    
+    # Return only needed columns
+    return df[['PAY_PERIOD', 'GROSS_PAY', 'ANOMALY_SCORE', 'IS_ANOMALY', 'RISK_LEVEL', 'EXPLANATION']]
+$$;
+```
+
+## Testing Pattern
+
+```sql
+-- Test with specific employee
+SELECT * 
+FROM TABLE(
+    HR_DEMO_DATA.ML_ANALYTICS.DETECT_PAYROLL_ANOMALIES(55, 12)
+);
+
+-- Test with employee known to have anomalies
+SELECT * 
+FROM TABLE(
+    HR_DEMO_DATA.ML_ANALYTICS.DETECT_PAYROLL_ANOMALIES(
+        (SELECT EMPLOYEE_ID FROM HR_DEMO_DATA.HR_DATA.PAYROLL_ANOMALIES LIMIT 1),
+        6
+    )
+);
+```
+
+## Streamlit Visualization
+
+See `ml_analytics/streamlit_app.py` for dashboard implementation.
+
+---
+
+Last Updated: October 6, 2025

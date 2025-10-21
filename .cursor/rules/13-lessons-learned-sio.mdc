@@ -1,0 +1,292 @@
+---
+description: Key learnings from SIO Irrigation project - October 2025
+alwaysApply: false
+---
+
+# Lessons Learned - SIO Irrigation Project
+
+**Project**: Saudi Irrigation Organization AI Demo  
+**Date**: October 21, 2025  
+**Key Learnings**: Critical patterns discovered during implementation
+
+---
+
+## Critical Fixes Applied
+
+### 1. Agent Schema Name - AGENTS not AGENTIC
+
+**Issue**: Created agent in SNOWFLAKE_INTELLIGENCE.AGENTIC  
+**Problem**: Agent didn't appear in Snowflake Intelligence UI  
+**Fix**: Use `SNOWFLAKE_INTELLIGENCE.AGENTS` schema
+
+```sql
+-- ✅ CORRECT
+USE DATABASE SNOWFLAKE_INTELLIGENCE;
+USE SCHEMA AGENTS;  -- Not AGENTIC!
+```
+
+**Impact**: Agent now appears in UI under AI & ML → Snowflake Intelligence
+
+---
+
+### 2. Streamlit Connection - Hosted vs Local
+
+**Issue**: `module 'streamlit' has no attribute 'connection'` in hosted Snowflake  
+**Problem**: `st.connection()` only exists in local Streamlit, not Snowflake-hosted  
+**Fix**: Dual-environment connection pattern
+
+```python
+@st.cache_resource
+def init_connection():
+    try:
+        # Hosted Snowflake Streamlit
+        from snowflake.snowpark.context import get_active_session
+        return get_active_session()
+    except:
+        # Local development
+        return st.connection("snowflake")
+
+def get_data(query):
+    session = init_connection()
+    if hasattr(session, 'sql'):
+        return session.sql(query).to_pandas()  # Hosted
+    else:
+        return session.query(query, ttl=60)    # Local
+```
+
+**Impact**: App works in both local testing and Snowflake deployment
+
+---
+
+### 3. set_page_config() Ordering
+
+**Issue**: `set_page_config() can only be called once per app`  
+**Problem**: Another Streamlit command (like `st.sidebar.warning()`) called before config  
+**Fix**: Make `st.set_page_config()` the absolute first Streamlit command
+
+```python
+# ✅ CORRECT
+import streamlit as st
+
+st.set_page_config(...)  # FIRST THING!
+
+# Then everything else
+try:
+    import plotly
+except:
+    st.warning(...)  # OK now
+```
+
+**Impact**: No configuration errors in hosted Streamlit
+
+---
+
+### 4. Semantic Model Relationships
+
+**Issue**: "Multiple tables needed but no relationships defined"  
+**Problem**: Cortex Analyst can't join tables without explicit relationships  
+**Fix**: Add relationships at root level in YAML
+
+```yaml
+# Structure:
+name: my_model
+tables:
+  - name: table1
+    ...
+  - name: table2
+    ...
+
+# ✅ Relationships at ROOT level (same indent as 'tables')
+relationships:
+  - name: table1_to_table2
+    left_table: table1
+    right_table: table2
+    relationship_columns:
+      - left_column: FOREIGN_KEY_COL
+        right_column: PRIMARY_KEY_COL
+    join_type: left_outer
+    relationship_type: many_to_one
+```
+
+**Impact**: Agent can now answer cross-table queries like "revenue by crop type"
+
+---
+
+### 5. Verified Queries - Use Sparingly
+
+**Learning**: Verified queries limit Cortex Analyst's flexibility  
+**Better Approach**: Let Analyst generate SQL dynamically  
+**When to Use**: Only for very specific business logic or demo-specific filtering
+
+**Impact**: More flexible, natural query handling
+
+---
+
+## Git Integration Workflow
+
+### Initial Setup
+1. Create Git repository integration in Snowflake
+2. Link to GitHub repo
+3. Create Streamlit FROM git repo path
+4. Add live version
+
+### Update Workflow
+1. Make code changes locally
+2. Test locally: `streamlit run app/streamlit_app.py`
+3. Commit and push to GitHub
+4. In Snowflake: `ALTER GIT REPOSITORY ... FETCH;`
+5. App auto-updates (or refresh in browser)
+
+**Benefit**: Version-controlled deployment, no manual file uploads
+
+---
+
+## Multi-Tool Agent Configuration
+
+### Tool Types Learned
+
+1. **Cortex Analyst** - `type: "cortex_analyst_text_to_sql"`
+2. **Cortex Search** - `type: "cortex_search"`
+3. **Custom Tools** - `type: "generic"` in spec, then `type: "function"` or `"procedure"` in resources
+4. **External Tools** - Can reference procedures/functions from other databases
+
+### Tool Resource Pattern
+
+```json
+{
+  "tools": [{
+    "tool_spec": {"type": "generic", "name": "my_tool"}
+  }],
+  "tool_resources": {
+    "my_tool": {
+      "type": "function",  // or "procedure"
+      "identifier": "DB.SCHEMA.FUNCTION_NAME",
+      "execution_environment": {
+        "type": "warehouse",
+        "warehouse": "WAREHOUSE_NAME"
+      }
+    }
+  }
+}
+```
+
+---
+
+## Orchestration Best Practices
+
+### Result Limiting
+
+**Add to orchestration instructions**:
+```
+"When queries return many results, LIMIT to 20 rows maximum and add summary: 
+'Showing first 20 of X total results'"
+```
+
+**Impact**: Prevents overwhelming responses, better UX
+
+### Positive Framing
+
+**Document in instructions**:
+- "Resource optimization" not "scarcity"
+- "Efficiency opportunities" not "problems"  
+- "Proactive planning" not "crisis management"
+
+**Impact**: Professional, constructive messaging
+
+---
+
+## Knowledge Base Creation
+
+### Document Approach
+
+**Text documents**: Direct INSERT into DOCUMENTS table (fast, simple)  
+**PDF documents**: Use Python reportlab to generate, then parse with SNOWFLAKE.CORTEX.PARSE_DOCUMENT
+
+### Cortex Search Service
+
+```sql
+CREATE CORTEX SEARCH SERVICE MY_SERVICE
+ON CONTENT              -- Column to index
+ATTRIBUTES CATEGORY     -- Optional: additional searchable fields
+WAREHOUSE = MY_WH
+TARGET_LAG = '1 minute'
+AS (
+    SELECT DOCUMENT_ID, TITLE, CONTENT, CATEGORY
+    FROM DOCUMENTS
+);
+```
+
+**Critical**: Use `search_service` (not `cortex_search_service`) in agent tool_resources
+
+---
+
+## Testing Approach
+
+### Test Order
+1. **Infrastructure first**: Database, tables, data loading
+2. **Components individually**: Semantic model, Cortex Search, functions
+3. **Agent creation**: With verified tools
+4. **Integration testing**: Agent with all tools
+5. **Streamlit**: Local first, then hosted
+
+**Why**: Don't debug agent if infrastructure broken
+
+---
+
+## Data Generation Insights
+
+### Direct to Snowflake vs CSV
+
+**Learned**: Can insert directly using snowflake-connector-python  
+**Better than**: Generate CSV → Upload → COPY INTO  
+**When**: Small to medium datasets (<1M rows)
+
+**Pattern**:
+```python
+import snowflake.connector
+
+conn = snowflake.connector.connect(...)
+cursor = conn.cursor()
+
+for row in data:
+    cursor.execute("INSERT INTO TABLE VALUES (%s, %s)", row)
+
+conn.commit()
+```
+
+---
+
+## Production Checklist
+
+Based on SIO project, before going live:
+
+- [ ] Database infrastructure created
+- [ ] Data loaded and verified
+- [ ] Semantic model uploaded with relationships
+- [ ] Knowledge base indexed
+- [ ] Cortex Search service active
+- [ ] Agent created in AGENTS schema
+- [ ] All tools tested independently
+- [ ] Agent tested with sample queries
+- [ ] Streamlit local testing passed
+- [ ] Streamlit deployed to Snowflake
+- [ ] Git integration configured
+- [ ] Test scenarios documented
+- [ ] Secrets properly gitignored
+
+---
+
+## Key Gotchas Summary
+
+1. ✅ AGENTS schema not AGENTIC
+2. ✅ Hosted Streamlit uses get_active_session() not st.connection()
+3. ✅ set_page_config() must be first
+4. ✅ Relationships at root level in semantic model
+5. ✅ search_service not cortex_search_service
+6. ✅ Custom function params UPPERCASE
+7. ✅ Test infrastructure before debugging agent
+8. ✅ Git FETCH to update Streamlit
+
+---
+
+**These learnings are now incorporated into the main cursor rules for future projects.**

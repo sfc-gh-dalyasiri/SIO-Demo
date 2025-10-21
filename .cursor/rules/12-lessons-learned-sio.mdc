@@ -289,4 +289,28 @@ Based on SIO project, before going live:
 
 ---
 
+### 6. Plotly Chart Rendering in SIS
+
+**Issue**: Plotly charts (px.line, px.bar) render incorrectly in SIS - show linear 0-N instead of actual data  
+**Problem**: Plotly library has compatibility issues with SIS environment  
+**Fix**: Detect SIS environment and use native Streamlit charts instead
+
+```python
+try:
+    import plotly.express as px
+    try:
+        from snowflake.snowpark.context import get_active_session
+        # In SIS - use native charts
+        PLOTLY_AVAILABLE = False
+    except:
+        # Local - use Plotly
+        PLOTLY_AVAILABLE = True
+except ImportError:
+    PLOTLY_AVAILABLE = False
+```
+
+**Impact**: Charts display correctly in both SIS and local environments
+
+---
+
 **These learnings are now incorporated into the main cursor rules for future projects.**

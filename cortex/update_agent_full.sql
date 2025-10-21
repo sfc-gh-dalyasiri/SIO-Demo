@@ -38,7 +38,7 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "cortex_analyst_text_to_sql",
         "name": "irrigation_data",
-        "description": "Query SIO database for water usage, billing, payments, customer information, regional statistics, and all numerical data. Use for any questions about usage, bills, payments, or statistics."
+        "description": "Query SIO database for water usage, billing, payments, customer information, regional statistics, weather data (INCLUDES 90-DAY FORECAST), and all numerical data. Use for ANY questions about usage, bills, payments, statistics, or WEATHER FORECASTS. Weather data is in the database - do not use web_scrape for weather."
       }
     },
     {
@@ -73,7 +73,7 @@ FROM SPECIFICATION $$
       "tool_spec": {
         "type": "generic",
         "name": "web_scrape",
-        "description": "Search the web for external information like weather forecasts, crop prices, farming techniques, or research. Use when information is not in SIO database or documents.",
+        "description": "Search the web for external information like crop prices, farming techniques, or agricultural research. DO NOT USE for weather (we have 90-day forecast in database). Use only when information is not available in SIO database or documents.",
         "input_schema": {
           "type": "object",
           "properties": {

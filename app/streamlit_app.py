@@ -40,11 +40,10 @@ try:
     # Check if running in SIS (has get_active_session)
     try:
         from snowflake.snowpark.context import get_active_session
-        # In SIS - disable Plotly for now to debug
+        # In SIS - use native Streamlit charts (Plotly has rendering issues)
         PLOTLY_AVAILABLE = False
-        st.sidebar.info("ℹ️ Using Streamlit native charts in SIS environment")
     except:
-        # Local - use Plotly
+        # Local - use Plotly for enhanced visualizations
         PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False

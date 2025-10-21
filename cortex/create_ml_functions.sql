@@ -110,7 +110,7 @@ def predict_demand(session, region_id_input, days_ahead):
         )
         
         # Fill missing weather data
-        merged_df = merged_df.fillna(method='ffill').fillna(method='bfill')
+        merged_df = merged_df.ffill().bfill()
         
         # Feature engineering
         merged_df['DAY_OF_YEAR'] = merged_df['READING_DATE'].dt.dayofyear

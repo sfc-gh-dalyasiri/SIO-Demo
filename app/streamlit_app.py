@@ -73,15 +73,24 @@ with st.sidebar:
     regions_df = get_data("SELECT REGION_ID, REGION_NAME FROM SIO_DB.DATA.REGIONS ORDER BY REGION_NAME")
     
     if not regions_df.empty:
+        # Add "Show All" option
+        region_options = ["Show All"] + regions_df['REGION_NAME'].tolist()
         selected_region = st.selectbox(
             "Select Region",
-            options=regions_df['REGION_NAME'].tolist(),
+            options=region_options,
             index=0
         )
-        selected_region_id = regions_df[regions_df['REGION_NAME'] == selected_region]['REGION_ID'].values[0]
+        
+        if selected_region == "Show All":
+            selected_region_id = None
+            region_filter = ""
+        else:
+            selected_region_id = regions_df[regions_df['REGION_NAME'] == selected_region]['REGION_ID'].values[0]
+            region_filter = f"AND r.REGION_ID = {selected_region_id}"
     else:
-        selected_region = "Riyadh"
-        selected_region_id = 1
+        selected_region = "Show All"
+        selected_region_id = None
+        region_filter = ""
     
     st.divider()
     
@@ -288,7 +297,7 @@ with tab2:
             use_container_width=True
         )
     else:
-        st.info("Efficiency analysis not available. Generate data first.")
+        st.warning("⚠️ ML Analytics functions not available. Run `snow sql -f cortex/create_ml_functions.sql` to enable advanced analytics.")
     
     st.divider()
     
@@ -346,17 +355,22 @@ with tab3:
         forecast_days = st.slider("Days to forecast", 7, 30, 14)
         
         if st.button("🚀 Generate Forecast", use_container_width=True, type="primary"):
-            with st.spinner(f"Generating {forecast_days}-day forecast for {selected_region}..."):
-                predictions = get_data(f"""
-                    SELECT * FROM TABLE(SIO_DB.ML_ANALYTICS.PREDICT_WATER_DEMAND({selected_region_id}, {forecast_days}))
-                    ORDER BY PREDICTION_DATE
-                """)
-                
-                if not predictions.empty:
-                    st.session_state['predictions'] = predictions
-                    st.session_state['forecast_region'] = selected_region
-                else:
-                    st.error("Failed to generate predictions")
+            if selected_region == "Show All":
+                st.error("⚠️ Please select a specific region to generate predictions.")
+            elif selected_region_id is None:
+                st.error("⚠️ No region selected.")
+            else:
+                with st.spinner(f"Generating {forecast_days}-day forecast for {selected_region}..."):
+                    predictions = get_data(f"""
+                        SELECT * FROM TABLE(SIO_DB.ML_ANALYTICS.PREDICT_WATER_DEMAND({selected_region_id}, {forecast_days}))
+                        ORDER BY PREDICTION_DATE
+                    """)
+                    
+                    if not predictions.empty:
+                        st.session_state['predictions'] = predictions
+                        st.session_state['forecast_region'] = selected_region
+                    else:
+                        st.warning("⚠️ ML prediction function not available. Run `snow sql -f cortex/create_ml_functions.sql` to enable forecasting.")
     
     with col1:
         if 'predictions' in st.session_state and not st.session_state['predictions'].empty:

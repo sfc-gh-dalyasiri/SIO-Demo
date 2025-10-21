@@ -475,7 +475,6 @@ relationships:
         right_column: CUSTOMER_ID
     join_type: left_outer
     relationship_type: many_to_one
-    description: Water usage connects to customers via meter_id (1:1 meter-customer mapping)
 
 # Verified queries removed - letting Cortex Analyst handle queries dynamically
 

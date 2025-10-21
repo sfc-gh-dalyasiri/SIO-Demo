@@ -18,16 +18,31 @@ alwaysApply: false
 ## Chart Fallback Strategy
 - Primary: Use plotly for enhanced visualizations when available
 - Always provide meaningful alternatives when dependencies unavailable
+- **CRITICAL**: Plotly renders incorrectly in hosted Snowflake Streamlit (SIS) - use native charts in SIS
 
 ## Import Pattern for Optional Dependencies
+
+**For SIS Compatibility** - Plotly has rendering issues in hosted environment:
+
 ```python
 try:
     import plotly.express as px
-    PLOTLY_AVAILABLE = True
+    import plotly.graph_objects as go
+    
+    # Detect SIS environment
+    try:
+        from snowflake.snowpark.context import get_active_session
+        # In SIS - use native Streamlit charts (Plotly renders incorrectly)
+        PLOTLY_AVAILABLE = False
+    except:
+        # Local - use Plotly for enhanced visualizations
+        PLOTLY_AVAILABLE = True
 except ImportError:
     PLOTLY_AVAILABLE = False
     st.warning("Plotly not available. Using Streamlit built-in charts.")
 ```
+
+**Why**: Plotly charts in SIS show incorrect data (often linear index instead of values)
 
 ## Error Handling Patterns
 - Always use try/except for optional dependencies
@@ -59,14 +74,21 @@ def get_data(query):
         # Check if it's Snowpark session (hosted) or connection object (local)
         if hasattr(session, 'sql'):
             # Hosted Snowflake Streamlit (Snowpark session)
-            return session.sql(query).to_pandas()
+            df = session.sql(query).to_pandas()
+            # Reset index to avoid chart rendering issues
+            return df.reset_index(drop=True)
         else:
             # Local development (connection object)
-            return session.query(query, ttl=60)
+            df = session.query(query)
+            return df.reset_index(drop=True)
     except Exception as e:
         st.error(f"Error executing query: {str(e)}")
         return pd.DataFrame()
 ```
+
+**Important additions:**
+- `.reset_index(drop=True)` prevents charts from using dataframe index instead of values
+- Removed `ttl=60` from query - use `@st.cache_data` decorator instead if needed
 
 **Why this matters:**
 - Local: Uses `st.connection("snowflake")` with secrets.toml
@@ -159,4 +181,76 @@ sleep 5 && echo "App should be running"
 - **Fix the root cause** rather than masking with delays
 - **Test immediately** after each fix
 - **Verify functionality** before proceeding
+
+## Compatibility Differences: Local vs Hosted Streamlit
+
+### API Differences
+
+**Features NOT available in hosted Snowflake Streamlit:**
+
+1. **st.column_config** - Does not exist
+   ```python
+   # ❌ WRONG - Breaks in hosted
+   st.dataframe(df, column_config={...})
+   
+   # ✅ CORRECT - Works everywhere
+   df = df.rename(columns={...})
+   df['amount'] = pd.to_numeric(df['amount']).round(2)
+   st.dataframe(df)
+   ```
+
+2. **st.rerun()** - Use fallback
+   ```python
+   # ✅ CORRECT - Works in both environments
+   try:
+       st.rerun()
+   except AttributeError:
+       st.experimental_rerun()
+   ```
+
+3. **hide_index parameter** - Does not exist
+   ```python
+   # ❌ WRONG
+   st.dataframe(df, hide_index=True)
+   
+   # ✅ CORRECT
+   st.dataframe(df)
+   ```
+
+4. **use_container_width parameter** - Causes deprecation warnings
+   ```python
+   # ❌ AVOID - Spams warnings
+   st.plotly_chart(fig, use_container_width=True)
+   
+   # ✅ CORRECT
+   st.plotly_chart(fig)
+   ```
+
+### Data Processing Best Practices
+
+**Always normalize data from Snowflake:**
+
+```python
+# Ensure column names are consistent (Snowflake returns uppercase)
+df.columns = [col.upper() for col in df.columns]
+
+# Convert to numeric before operations (Snowflake may return object types)
+df['numeric_col'] = pd.to_numeric(df['numeric_col'], errors='coerce').fillna(0)
+
+# Reset index to avoid chart rendering issues
+df = df.reset_index(drop=True)
+```
+
+### Chart Rendering
+
+**Plotly charts render incorrectly in hosted Streamlit** - shows linear index instead of data
+
+```python
+# ✅ BEST PRACTICE - Environment-aware charting
+if PLOTLY_AVAILABLE:  # Set to False in hosted environment
+    fig = px.line(df, x='date', y='value')
+    st.plotly_chart(fig)
+else:
+    st.line_chart(df.set_index('date')['value'])
+```
 

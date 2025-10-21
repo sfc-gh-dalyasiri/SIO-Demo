@@ -20,7 +20,7 @@ User Query → Agent → [Tool Selection] → Tool Execution → Response
 ```sql
 USE ROLE ACCOUNTADMIN;
 USE DATABASE SNOWFLAKE_INTELLIGENCE;  -- Required for agents
-USE SCHEMA AGENTIC;                    -- Required for agents
+USE SCHEMA AGENTS;                     -- CRITICAL: Use AGENTS not AGENTIC for UI visibility
 USE WAREHOUSE MY_WAREHOUSE;
 
 CREATE OR REPLACE AGENT MY_APP_AGENT
@@ -331,7 +331,9 @@ SELECT 'Complete agent created successfully!' AS STATUS;
 }
 ```
 
-**⚠️ CRITICAL**: Use `search_service` not `cortex_search_service`.
+**⚠️ CRITICAL**: 
+- Use `search_service` not `cortex_search_service`
+- Use schema `AGENTS` not `AGENTIC` for agents to appear in Snowflake Intelligence UI
 
 #### Custom Function Resources
 

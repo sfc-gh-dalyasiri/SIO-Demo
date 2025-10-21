@@ -481,11 +481,11 @@ ALTER STAGE MY_APP_DB.SEMANTIC_MODELS.SEMANTIC_MODEL_STAGE
 
 Then refresh the Snowsight Cortex Analyst page.
 
-### Issue: "unknown field 'relationships'" error
+### Issue: "Multiple tables needed but no relationships defined"
 
-**Cause**: Relationships defined at wrong level in YAML
+**Cause**: Missing relationships section in semantic model
 
-**Solution**: Relationships must be at ROOT level, not nested under tables:
+**Solution**: Relationships must be defined at ROOT level (same indentation as `tables:`), not nested under individual tables:
 
 ```yaml
 # ❌ WRONG

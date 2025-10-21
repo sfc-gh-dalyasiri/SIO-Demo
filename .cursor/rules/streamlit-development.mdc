@@ -35,6 +35,72 @@ except ImportError:
 - Log warnings for missing features, not errors
 - Use Streamlit's built-in connection management when possible
 
+## Snowflake Connection Pattern (Local vs Hosted)
+
+**CRITICAL**: Streamlit connection differs between local and hosted Snowflake environments.
+
+```python
+# CORRECT - Works in both local and hosted
+@st.cache_resource
+def init_connection():
+    """Initialize Snowflake connection - works for both local and hosted"""
+    try:
+        # Try hosted Snowflake Streamlit first
+        from snowflake.snowpark.context import get_active_session
+        return get_active_session()
+    except:
+        # Fall back to local development with st.connection
+        return st.connection("snowflake")
+
+def get_data(query):
+    """Execute query and return results"""
+    try:
+        session = init_connection()
+        # Check if it's Snowpark session (hosted) or connection object (local)
+        if hasattr(session, 'sql'):
+            # Hosted Snowflake Streamlit (Snowpark session)
+            return session.sql(query).to_pandas()
+        else:
+            # Local development (connection object)
+            return session.query(query, ttl=60)
+    except Exception as e:
+        st.error(f"Error executing query: {str(e)}")
+        return pd.DataFrame()
+```
+
+**Why this matters:**
+- Local: Uses `st.connection("snowflake")` with secrets.toml
+- Hosted: Uses `get_active_session()` from snowflake.snowpark.context
+- This pattern works in BOTH environments seamlessly
+
+## Page Configuration
+**CRITICAL**: `st.set_page_config()` MUST be the very first Streamlit command.
+
+```python
+# CORRECT
+import streamlit as st
+
+st.set_page_config(...)  # FIRST!
+
+# Then other imports and code
+try:
+    import plotly
+except:
+    st.warning(...)  # OK after set_page_config
+```
+
+```python
+# WRONG - Will cause error in hosted Streamlit
+import streamlit as st
+
+try:
+    import plotly
+except:
+    st.warning(...)  # ERROR! Called before set_page_config
+
+st.set_page_config(...)  # Too late!
+```
+
 ## AI Summary Optimization
 
 

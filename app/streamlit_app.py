@@ -401,7 +401,34 @@ with tab3:
         
         if st.button("🚀 Generate Forecast", use_container_width=True, type="primary"):
             if selected_region == "Show All":
-                st.error("⚠️ Please select a specific region to generate predictions.")
+                # Forecast for all regions combined
+                with st.spinner(f"Generating {forecast_days}-day forecast for all regions..."):
+                    # Get all region IDs
+                    all_predictions = []
+                    for _, region_row in regions_df.iterrows():
+                        region_id = region_row['REGION_ID']
+                        pred = get_data(f"""
+                            SELECT * FROM TABLE(SIO_DB.ML_ANALYTICS.PREDICT_WATER_DEMAND({region_id}, {forecast_days}))
+                        """)
+                        if not pred.empty:
+                            all_predictions.append(pred)
+                    
+                    if all_predictions:
+                        # Combine and aggregate by date
+                        combined = pd.concat(all_predictions, ignore_index=True)
+                        predictions = combined.groupby('PREDICTION_DATE').agg({
+                            'PREDICTED_DEMAND_M3': 'sum',
+                            'CONFIDENCE_LEVEL': 'first',
+                            'SEASONAL_FACTOR': 'mean',
+                            'WEATHER_FACTOR': 'mean',
+                            'RECOMMENDATION': lambda x: 'Combined forecast for all regions'
+                        }).reset_index()
+                        predictions = predictions.sort_values('PREDICTION_DATE')
+                        
+                        st.session_state['predictions'] = predictions
+                        st.session_state['forecast_region'] = "All Regions"
+                    else:
+                        st.warning("⚠️ Unable to generate forecast.")
             elif selected_region_id is None:
                 st.error("⚠️ No region selected.")
             else:
@@ -415,7 +442,7 @@ with tab3:
                         st.session_state['predictions'] = predictions
                         st.session_state['forecast_region'] = selected_region
                     else:
-                        st.warning("⚠️ ML prediction function not available. Run `snow sql -f cortex/create_ml_functions.sql` to enable forecasting.")
+                        st.warning("⚠️ ML prediction function not available. Run `snow sql -f cortex/create_ml_functions_simple.sql` to enable forecasting.")
     
     with col1:
         if 'predictions' in st.session_state and not st.session_state['predictions'].empty:

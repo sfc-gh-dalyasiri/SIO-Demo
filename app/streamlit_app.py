@@ -577,6 +577,61 @@ with tab3:
                 st.metric("High Confidence Predictions", f"{high_conf_pct:.0f}%")
         else:
             st.info("👆 Select a region and click 'Generate Forecast' to see predictions")
+    
+    st.divider()
+    
+    # ML Anomaly Detection Section
+    st.markdown("### 🔍 Water Usage Anomaly Detection")
+    st.markdown("Detect unusual consumption patterns using ML-powered analysis")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col2:
+        st.subheader("Analysis Settings")
+        
+        # Get customer list
+        customers_df = get_data("SELECT CUSTOMER_ID, CUSTOMER_NAME, REGION_ID FROM SIO_DB.DATA.CUSTOMERS ORDER BY CUSTOMER_NAME LIMIT 100")
+        
+        if not customers_df.empty:
+            customer_options = customers_df['CUSTOMER_NAME'].tolist()
+            selected_customer_name = st.selectbox(
+                "Select Customer",
+                options=customer_options,
+                help="Choose a customer to analyze"
+            )
+            
+            selected_customer_id = customers_df[customers_df['CUSTOMER_NAME'] == selected_customer_name]['CUSTOMER_ID'].values[0]
+            
+            analysis_months = st.slider("Months to analyze", 1, 12, 6)
+            
+            if st.button("🔍 Detect Anomalies", type="primary"):
+                with st.spinner(f"Running ML anomaly detection for {selected_customer_name}..."):
+                    # Call the ML procedure
+                    result = get_data(f"""
+                        CALL SIO_DB.ML_ANALYTICS.ANALYZE_WATER_USAGE_ANOMALIES({selected_customer_id}, {analysis_months})
+                    """)
+                    
+                    if not result.empty:
+                        # Extract the text result from the procedure
+                        anomaly_report = result.iloc[0, 0]
+                        st.session_state['anomaly_report'] = anomaly_report
+                        st.session_state['analyzed_customer'] = selected_customer_name
+                    else:
+                        st.error("Failed to run anomaly detection")
+        else:
+            st.warning("No customers available")
+    
+    with col1:
+        if 'anomaly_report' in st.session_state:
+            analyzed_customer = st.session_state.get('analyzed_customer', 'Unknown')
+            st.subheader(f"📊 Analysis Results: {analyzed_customer}")
+            
+            # Display the ML report in a nice formatted box
+            st.code(st.session_state['anomaly_report'], language=None)
+            
+            st.info("💡 **What This Means**: The ML model identifies unusual water consumption patterns that may indicate leaks, equipment malfunction, or billing issues.")
+        else:
+            st.info("👆 Select a customer and click 'Detect Anomalies' to run ML analysis")
 
 # ============================================================================
 # TAB 4: BILLING & PAYMENTS

@@ -137,18 +137,13 @@ with tab1:
             st.metric("Active Customers", "N/A")
     
     # Total Water Usage (Last 30 days)
-    usage_region_filter = f"""
-        AND wm.METER_ID IN (
-            SELECT METER_ID FROM SIO_DB.DATA.WATER_METERS wm2
-            JOIN SIO_DB.DATA.CUSTOMERS c2 ON wm2.CUSTOMER_ID = c2.CUSTOMER_ID
-            WHERE c2.REGION_ID = {selected_region_id}
-        )
-    """ if selected_region_id else ""
+    usage_region_filter = f" AND c.REGION_ID = {selected_region_id}" if selected_region_id else ""
     
     total_usage = get_data(f"""
         SELECT SUM(wu.VOLUME_M3) AS TOTAL_USAGE
         FROM SIO_DB.DATA.WATER_USAGE wu
         JOIN SIO_DB.DATA.WATER_METERS wm ON wu.METER_ID = wm.METER_ID
+        JOIN SIO_DB.DATA.CUSTOMERS c ON wm.CUSTOMER_ID = c.CUSTOMER_ID
         WHERE wu.READING_DATE >= DATEADD(day, -{days_back}, CURRENT_DATE())
         {usage_region_filter}
     """)
@@ -330,12 +325,11 @@ with tab2:
             COALESCE(SUM(ws.CAPACITY_M3), 1) AS CAPACITY_M3
         FROM SIO_DB.DATA.REGIONS r
         LEFT JOIN SIO_DB.DATA.CUSTOMERS c ON r.REGION_ID = c.REGION_ID
-        LEFT JOIN SIO_DB.DATA.WATER_USAGE wu ON c.CUSTOMER_ID IN (
-            SELECT wm.CUSTOMER_ID FROM SIO_DB.DATA.WATER_METERS wm WHERE wm.METER_ID = wu.METER_ID
-        )
+        LEFT JOIN SIO_DB.DATA.WATER_METERS wm ON c.CUSTOMER_ID = wm.CUSTOMER_ID
+        LEFT JOIN SIO_DB.DATA.WATER_USAGE wu ON wm.METER_ID = wu.METER_ID 
+            AND (wu.READING_DATE >= DATEADD(day, -30, CURRENT_DATE()) OR wu.READING_DATE IS NULL)
         LEFT JOIN SIO_DB.DATA.WATER_SOURCES ws ON r.REGION_ID = ws.REGION_ID
-        WHERE (wu.READING_DATE >= DATEADD(day, -30, CURRENT_DATE()) OR wu.READING_DATE IS NULL)
-        {region_filter}
+        WHERE 1=1 {region_filter}
         GROUP BY r.REGION_NAME, r.REGION_ID
     """)
     

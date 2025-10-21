@@ -679,7 +679,14 @@ with tab3:
                     st.info(technical.strip())
                     
                     st.markdown("#### 🤖 AI Diagnosis")
-                    st.success(ai_part.strip())
+                    # Clean up AI response - remove any preamble
+                    ai_cleaned = ai_part.strip()
+                    # Remove common preambles
+                    ai_cleaned = re.sub(r'^Here is .*?:\s*', '', ai_cleaned, flags=re.IGNORECASE)
+                    ai_cleaned = re.sub(r'^\*\*.*?\*\*\s*', '', ai_cleaned)  # Remove bold headers
+                    ai_cleaned = ai_cleaned.strip()
+                    
+                    st.success(ai_cleaned)
                 else:
                     st.markdown("#### 🔬 Analysis")
                     st.info(why_text)

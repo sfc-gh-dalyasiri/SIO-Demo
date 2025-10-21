@@ -121,14 +121,14 @@ def analyze_anomalies(session, customer_id_input, months_back):
     technical_explanation = "; ".join([dev[1][1] for dev in sorted_deviations[:3]])
     
     # Use Cortex AI to generate natural language explanation
-    prompt = f"""Explain this water usage anomaly in 1-2 sentences for a facility manager:
-    
-Customer had unusual water consumption on {max_anomaly_date}.
-Technical details: {technical_explanation}
-Average usage: {avg_usage:.0f} m³, Anomalous day: {max_anomaly_volume:.0f} m³
-Anomaly score: {norm_scores[max_anomaly_idx]:.0f}/100
+    prompt = f"""You are a water facility expert. Analyze this anomaly and provide ONLY a 2-sentence diagnosis without any preamble.
 
-Provide a clear, actionable explanation focusing on what might have caused this and what to check."""
+Anomaly Date: {max_anomaly_date}
+Technical Data: {technical_explanation}
+Normal usage: {avg_usage:.0f} m³/day, This day: {max_anomaly_volume:.0f} m³
+Risk Score: {norm_scores[max_anomaly_idx]:.0f}/100
+
+Write 2 sentences: First sentence explains the likely cause. Second sentence states what to check or investigate."""
     
     try:
         ai_explanation_query = f"""

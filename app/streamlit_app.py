@@ -203,7 +203,7 @@ with tab1:
                          title=f'Daily Water Usage - Last {days_back} Days',
                          labels={'DAILY_USAGE': 'Usage (m³)', 'DATE': 'Date'})
             fig.update_traces(line_color='#1f77b4', line_width=2)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
         else:
             st.line_chart(usage_trends.set_index('DATE')['DAILY_USAGE'])
     else:
@@ -247,11 +247,7 @@ with tab1:
         display_df["Capacity (m³)"] = pd.to_numeric(display_df["Capacity (m³)"], errors='coerce').fillna(0).round(0).astype(int)
         display_df["Utilization %"] = pd.to_numeric(display_df["Utilization %"], errors='coerce').fillna(0).round(1)
         
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True
-        )
+        st.dataframe(display_df)
     else:
         st.info("No regional data available")
 
@@ -284,7 +280,7 @@ with tab2:
                 color_continuous_scale='RdYlGn'
             )
             fig.update_layout(height=400)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
         else:
             st.bar_chart(efficiency_data.set_index('REGION_NAME')['EFFICIENCY_SCORE'])
         
@@ -305,11 +301,7 @@ with tab2:
         display_df["Score"] = pd.to_numeric(display_df["Score"], errors='coerce').fillna(0).round(1)
         display_df["Utilization %"] = pd.to_numeric(display_df["Utilization %"], errors='coerce').fillna(0).round(1)
         
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True
-        )
+        st.dataframe(display_df)
     else:
         st.warning("⚠️ ML Analytics functions not available. Run `snow sql -f cortex/create_ml_functions.sql` to enable advanced analytics.")
     
@@ -359,22 +351,23 @@ with tab2:
         heatmap_data['TOTAL_USAGE_M3'] = pd.to_numeric(heatmap_data['TOTAL_USAGE_M3'], errors='coerce').fillna(0)
         heatmap_data['CURRENT_LEVEL_M3'] = pd.to_numeric(heatmap_data['CURRENT_LEVEL_M3'], errors='coerce').fillna(0)
         heatmap_data['CAPACITY_M3'] = pd.to_numeric(heatmap_data['CAPACITY_M3'], errors='coerce').fillna(1)
+        heatmap_data['CUSTOMERS'] = pd.to_numeric(heatmap_data['CUSTOMERS'], errors='coerce').fillna(0)
         
         heatmap_data['UTILIZATION_PCT'] = (heatmap_data['CURRENT_LEVEL_M3'] / heatmap_data['CAPACITY_M3']) * 100
         
-        # Color based on utilization (red = high >85%, orange = 60-85%, green = <60%)
+        # Color based on utilization
         def get_color(util):
-            util = min(util, 100)  # Cap at 100
+            util = min(util, 100)
             if util >= 85:
-                return [220, 20, 60, 180]  # Crimson - high utilization (warning)
+                return [220, 20, 60, 180]  # Crimson - high
             elif util >= 60:
-                return [255, 165, 0, 180]  # Orange - moderate (watch)
+                return [255, 165, 0, 180]  # Orange - moderate
             else:
-                return [34, 139, 34, 180]  # Forest green - good (optimal)
+                return [34, 139, 34, 180]  # Green - optimal
         
         heatmap_data['color'] = heatmap_data['UTILIZATION_PCT'].apply(get_color)
         
-        # Size in meters - normalized to 30000-100000m range for visibility
+        # Size in meters
         min_usage = heatmap_data['TOTAL_USAGE_M3'].min()
         max_usage = heatmap_data['TOTAL_USAGE_M3'].max()
         if max_usage > min_usage:
@@ -382,12 +375,58 @@ with tab2:
         else:
             heatmap_data['size'] = 50000
         
-        st.map(heatmap_data, 
-               latitude='lat',
-               longitude='lon', 
-               size='size',
-               color='color',
-               zoom=6)
+        # Use pydeck for tooltips
+        try:
+            import pydeck as pdk
+            
+            layer = pdk.Layer(
+                'ScatterplotLayer',
+                data=heatmap_data,
+                get_position='[lon, lat]',
+                get_color='color',
+                get_radius='size',
+                pickable=True,
+                opacity=0.7,
+                stroked=True,
+                filled=True,
+                radius_scale=1,
+                radius_min_pixels=10,
+                radius_max_pixels=100,
+                line_width_min_pixels=1
+            )
+            
+            view_state = pdk.ViewState(
+                latitude=24.0,
+                longitude=45.0,
+                zoom=5.5,
+                pitch=0
+            )
+            
+            tooltip = {
+                "html": "<b>{REGION_NAME}</b><br/>"
+                        "Usage: {TOTAL_USAGE_M3:,.0f} m³<br/>"
+                        "Customers: {CUSTOMERS:,.0f}<br/>"
+                        "Utilization: {UTILIZATION_PCT:.1f}%",
+                "style": {
+                    "backgroundColor": "steelblue",
+                    "color": "white"
+                }
+            }
+            
+            st.pydeck_chart(pdk.Deck(
+                layers=[layer],
+                initial_view_state=view_state,
+                tooltip=tooltip,
+                map_style='light'
+            ))
+        except ImportError:
+            # Fallback to simple st.map without tooltips
+            st.map(heatmap_data, 
+                   latitude='lat',
+                   longitude='lon', 
+                   size='size',
+                   color='color',
+                   zoom=6)
     else:
         st.info("Map requires regional data")
 
@@ -403,7 +442,7 @@ with tab3:
         st.subheader("Forecast Settings")
         forecast_days = st.slider("Days to forecast", 7, 30, 14)
         
-        if st.button("🚀 Generate Forecast", use_container_width=True, type="primary"):
+        if st.button("🚀 Generate Forecast", type="primary"):
             if selected_region == "Show All":
                 # Forecast for all regions combined
                 with st.spinner(f"Generating {forecast_days}-day forecast for all regions..."):
@@ -482,7 +521,7 @@ with tab3:
                     height=400
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig)
             else:
                 st.line_chart(predictions.set_index('PREDICTION_DATE')['PREDICTED_DEMAND_M3'])
             
@@ -560,7 +599,7 @@ with tab4:
                 color='BILL_STATUS',
                 color_discrete_map={'PAID': 'green', 'PENDING': 'orange', 'OVERDUE': 'red'}
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
         
         with col2:
             fig = px.pie(
@@ -571,7 +610,7 @@ with tab4:
                 color='BILL_STATUS',
                 color_discrete_map={'PAID': 'green', 'PENDING': 'orange', 'OVERDUE': 'red'}
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
     
     st.divider()
     
@@ -611,11 +650,7 @@ with tab4:
         display_df["Amount (SAR)"] = pd.to_numeric(display_df["Amount (SAR)"], errors='coerce').fillna(0).round(2)
         display_df["Days Overdue"] = pd.to_numeric(display_df["Days Overdue"], errors='coerce').fillna(0).astype(int)
         
-        st.dataframe(
-            display_df,
-            hide_index=True,
-            use_container_width=True
-        )
+        st.dataframe(display_df)
         
         # Summary metrics
         total_overdue = overdue_bills['TOTAL_AMOUNT_SAR'].sum()
@@ -660,7 +695,7 @@ with tab4:
                 color_continuous_scale='Reds'
             )
             fig.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig)
         else:
             st.bar_chart(regional_payments.set_index('REGION_NAME')['OVERDUE_AMOUNT'])
 

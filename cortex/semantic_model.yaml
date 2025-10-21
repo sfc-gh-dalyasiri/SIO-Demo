@@ -436,6 +436,90 @@ tables:
       columns:
         - READING_ID
 
+  # ========================================================================
+  # WEATHER_DATA TABLE (Historical + 90-day Forecast)
+  # ========================================================================
+  - name: weather_data
+    description: Historical and forecast weather data for all regions (includes 90-day forecast)
+    base_table:
+      database: SIO_DB
+      schema: DATA
+      table: WEATHER_DATA
+    
+    dimensions:
+      - name: weather_id
+        description: Unique identifier for weather record
+        expr: WEATHER_ID
+        data_type: NUMBER
+      
+      - name: region_id
+        description: Region for this weather data
+        expr: REGION_ID
+        data_type: NUMBER
+      
+      - name: weather_date
+        synonyms:
+          - date
+          - forecast date
+          - when
+        description: Date of weather observation or forecast
+        expr: WEATHER_DATE
+        data_type: DATE
+    
+    facts:
+      - name: temperature_max_c
+        synonyms:
+          - max temperature
+          - high temperature
+        description: Maximum temperature in Celsius
+        expr: TEMPERATURE_MAX_C
+        data_type: NUMBER
+      
+      - name: temperature_min_c
+        synonyms:
+          - min temperature
+          - low temperature
+        description: Minimum temperature in Celsius
+        expr: TEMPERATURE_MIN_C
+        data_type: NUMBER
+      
+      - name: temperature_avg_c
+        synonyms:
+          - average temperature
+          - temperature
+          - temp
+        description: Average temperature in Celsius
+        expr: TEMPERATURE_AVG_C
+        data_type: NUMBER
+      
+      - name: rainfall_mm
+        synonyms:
+          - rain
+          - rainfall
+          - precipitation
+        description: Rainfall in millimeters
+        expr: RAINFALL_MM
+        data_type: NUMBER
+      
+      - name: humidity_percent
+        synonyms:
+          - humidity
+        description: Humidity percentage
+        expr: HUMIDITY_PERCENT
+        data_type: NUMBER
+      
+      - name: wind_speed_kmh
+        synonyms:
+          - wind speed
+          - wind
+        description: Wind speed in kilometers per hour
+        expr: WIND_SPEED_KMH
+        data_type: NUMBER
+    
+    primary_key:
+      columns:
+        - WEATHER_ID
+
 # ========================================================================
 # RELATIONSHIPS (Define how tables connect)
 # ========================================================================
@@ -473,6 +557,15 @@ relationships:
     relationship_columns:
       - left_column: METER_ID
         right_column: CUSTOMER_ID
+    join_type: left_outer
+    relationship_type: many_to_one
+  
+  - name: weather_to_region
+    left_table: weather_data
+    right_table: regions
+    relationship_columns:
+      - left_column: REGION_ID
+        right_column: REGION_ID
     join_type: left_outer
     relationship_type: many_to_one
 
